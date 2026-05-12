@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-05-12T12:14:53.407Z",
+  "source": "auto-postool",
+  "partial": false,
+  "phase": null,
+  "phase_name": null,
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "auto-checkpoint",
+  "completed_tasks": [],
+  "remaining_tasks": [],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [],
+  "uncommitted_files": [
+    {
+      "status": "??",
+      "path": ".claude/"
+    },
+    {
+      "status": "??",
+      "path": ".planning/"
+    }
+  ],
+  "next_action": null,
+  "context_notes": "Recent commits:\n072a6f0 Initial commit"
+}
