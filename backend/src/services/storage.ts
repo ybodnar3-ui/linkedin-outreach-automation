@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database, { Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
@@ -9,7 +9,7 @@ if (!fs.existsSync(DB_DIR)) {
   fs.mkdirSync(DB_DIR, { recursive: true });
 }
 
-const db = new Database(DB_PATH);
+const db: DatabaseType = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -105,3 +105,4 @@ export function setSetting(key: string, value: string): void {
 }
 
 export { db };
+export type { DatabaseType };
