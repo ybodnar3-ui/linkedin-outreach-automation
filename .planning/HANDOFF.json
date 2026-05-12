@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-12T12:23:01.497Z",
+  "timestamp": "2026-05-12T12:32:14.643Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -26,29 +26,9 @@
     },
     {
       "status": "??",
-      "path": ".planning/PROJECT.md"
-    },
-    {
-      "status": "??",
-      "path": ".planning/REQUIREMENTS.md"
-    },
-    {
-      "status": "??",
-      "path": ".planning/ROADMAP.md"
-    },
-    {
-      "status": "??",
-      "path": ".planning/STATE.md"
-    },
-    {
-      "status": "??",
-      "path": ".planning/config.json"
-    },
-    {
-      "status": "??",
-      "path": "CLAUDE.md"
+      "path": ".planning/phases/"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\n03a6bbf Add GSD planning checkpoint\n072a6f0 Initial commit"
+  "context_notes": "Recent commits:\n267f72f docs: initialize project with full spec and LLM-friendly documentation\n03a6bbf Add GSD planning checkpoint\n072a6f0 Initial commit"
 }
