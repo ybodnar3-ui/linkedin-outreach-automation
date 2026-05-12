@@ -40,6 +40,7 @@ export const analyticsApi = {
   overview: () => api.get('/analytics/overview').then(r => r.data),
   daily: (days?: number) => api.get('/analytics/daily', { params: { days } }).then(r => r.data),
   campaign: (id: string) => api.get(`/analytics/campaign/${id}`).then(r => r.data),
+  campaignsSummary: () => api.get('/analytics/campaigns-summary').then(r => r.data),
 };
 
 // Settings

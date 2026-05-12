@@ -41,4 +41,24 @@ router.get('/campaign/:id', (req: Request, res: Response) => {
   return res.json(stats);
 });
 
+// Comparison across all campaigns for bar chart
+router.get('/campaigns-summary', (_req: Request, res: Response) => {
+  const rows = db.prepare(`
+    SELECT
+      c.id,
+      c.name,
+      COUNT(l.id) as total_leads,
+      SUM(CASE WHEN l.connection_sent_at IS NOT NULL THEN 1 ELSE 0 END) as connections_sent,
+      SUM(CASE WHEN l.connected_at IS NOT NULL THEN 1 ELSE 0 END) as connected,
+      SUM(CASE WHEN l.last_message_at IS NOT NULL THEN 1 ELSE 0 END) as messaged,
+      ROUND(100.0 * SUM(CASE WHEN l.connected_at IS NOT NULL THEN 1 ELSE 0 END)
+        / MAX(1, SUM(CASE WHEN l.connection_sent_at IS NOT NULL THEN 1 ELSE 0 END)), 1) as acceptance_rate
+    FROM campaigns c
+    LEFT JOIN leads l ON l.campaign_id = c.id
+    GROUP BY c.id
+    ORDER BY acceptance_rate DESC
+  `).all();
+  return res.json(rows);
+});
+
 export default router;

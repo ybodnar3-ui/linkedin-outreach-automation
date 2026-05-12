@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
+import path from 'path';
+import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { initDb } from './services/storage';
 import { logger } from './utils/logger';
@@ -50,6 +52,15 @@ app.post('/api/pause-all', (_req, res) => {
   broadcastLog('pause_all', { message: 'All campaigns paused' });
   res.json({ ok: true });
 });
+
+// Serve frontend static files in production
+const publicDir = path.join(__dirname, '..', 'public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+}
 
 initDb();
 logger.info('Database initialized');
