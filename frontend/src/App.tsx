@@ -1,18 +1,39 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import { wsClient } from './lib/ws';
+import { useEffect } from 'react';
+import { Layout } from './components/Layout';
+import { DashboardPage } from './pages/DashboardPage';
+import { CampaignsPage } from './pages/CampaignsPage';
+import { CampaignBuilderPage } from './pages/CampaignBuilderPage';
+import { LeadsPage } from './pages/LeadsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 function App() {
+  useEffect(() => {
+    wsClient.connect();
+    return () => wsClient.disconnect();
+  }, []);
+
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-gray-50 text-gray-900">
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/campaigns" replace />} />
-          <Route path="/campaigns" element={<div className="p-8 text-center text-gray-400">Campaigns — coming soon</div>} />
-          <Route path="/leads" element={<div className="p-8 text-center text-gray-400">Leads — coming soon</div>} />
-          <Route path="/analytics" element={<div className="p-8 text-center text-gray-400">Analytics — coming soon</div>} />
-          <Route path="/settings" element={<div className="p-8 text-center text-gray-400">Settings — coming soon</div>} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route element={<Layout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/campaigns/new" element={<CampaignBuilderPage />} />
+            <Route path="/campaigns/:id/edit" element={<CampaignBuilderPage />} />
+            <Route path="/leads" element={<LeadsPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Route>
         </Routes>
-      </div>
-    </BrowserRouter>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 

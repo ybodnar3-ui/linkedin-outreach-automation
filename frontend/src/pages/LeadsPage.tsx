@@ -1,0 +1,221 @@
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Upload, Plus, X, SkipForward } from 'lucide-react';
+import { leadsApi, campaignsApi } from '../lib/api';
+
+interface Lead {
+  id: string;
+  linkedin_url: string;
+  first_name: string | null;
+  last_name: string | null;
+  company: string | null;
+  title: string | null;
+  status: string;
+  campaign_id: string;
+  updated_at: number;
+}
+
+interface Campaign { id: string; name: string }
+
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'text-gray-500',
+  in_progress: 'text-blue-600',
+  completed: 'text-green-600',
+  skipped: 'text-yellow-600',
+};
+
+export function LeadsPage() {
+  const qc = useQueryClient();
+  const [campaignFilter, setCampaignFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvCampaign, setCsvCampaign] = useState('');
+  const [csvResult, setCsvResult] = useState<{ added: number; skipped: number; errors: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['leads', campaignFilter, statusFilter, page],
+    queryFn: () => leadsApi.list({ campaign_id: campaignFilter || undefined, status: statusFilter || undefined, page, limit: 25 }),
+  });
+
+  const { data: campaigns = [] } = useQuery({ queryKey: ['campaigns'], queryFn: campaignsApi.list });
+
+  const skipMutation = useMutation({
+    mutationFn: (id: string) => leadsApi.skip(id, 'manual'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['leads'] }),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: () => leadsApi.importCsv(csvCampaign, csvFile!),
+    onSuccess: (res) => { setCsvResult(res); qc.invalidateQueries({ queryKey: ['leads'] }); },
+  });
+
+  // Add lead form state
+  const [addForm, setAddForm] = useState({ campaign_id: '', linkedin_url: '', first_name: '', last_name: '', company: '', title: '' });
+  const addMutation = useMutation({
+    mutationFn: () => leadsApi.create(addForm),
+    onSuccess: () => { setShowAddModal(false); setAddForm({ campaign_id: '', linkedin_url: '', first_name: '', last_name: '', company: '', title: '' }); qc.invalidateQueries({ queryKey: ['leads'] }); },
+  });
+
+  const leads: Lead[] = data?.leads ?? [];
+  const total: number = data?.total ?? 0;
+  const totalPages = Math.ceil(total / 25) || 1;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-gray-900">Leads <span className="text-gray-400 text-base font-normal">({total})</span></h1>
+        <div className="flex gap-2">
+          <button onClick={() => setShowCsvModal(true)} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors">
+            <Upload size={15} /> Import CSV
+          </button>
+          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            <Plus size={15} /> Add Lead
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-3">
+        <select value={campaignFilter} onChange={e => { setCampaignFilter(e.target.value); setPage(1); }} className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
+          <option value="">All Campaigns</option>
+          {(campaigns as Campaign[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
+          <option value="">All Statuses</option>
+          {['pending', 'in_progress', 'completed', 'skipped'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="border-b border-gray-100 bg-gray-50">
+            <tr>
+              {['Name', 'Company', 'Title', 'Status', 'Last Action', ''].map(h => (
+                <th key={h} className="text-left text-xs font-medium text-gray-500 px-4 py-3">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {isLoading && <tr><td colSpan={6} className="text-center py-8 text-gray-400">Loading…</td></tr>}
+            {!isLoading && leads.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No leads found</td></tr>}
+            {leads.map(l => (
+              <tr key={l.id} className="hover:bg-gray-50/50 transition-colors">
+                <td className="px-4 py-3">
+                  <a href={l.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">
+                    {[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}
+                  </a>
+                </td>
+                <td className="px-4 py-3 text-gray-600">{l.company || '—'}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{l.title || '—'}</td>
+                <td className="px-4 py-3">
+                  <span className={`font-medium ${STATUS_COLOR[l.status] ?? 'text-gray-500'}`}>{l.status}</span>
+                </td>
+                <td className="px-4 py-3 text-gray-400 text-xs">{new Date(l.updated_at * 1000).toLocaleDateString()}</td>
+                <td className="px-4 py-3">
+                  {l.status !== 'skipped' && l.status !== 'completed' && (
+                    <button onClick={() => skipMutation.mutate(l.id)} className="text-gray-400 hover:text-yellow-600" title="Skip">
+                      <SkipForward size={14} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between text-sm text-gray-500">
+        <span>Page {page} of {totalPages}</span>
+        <div className="flex gap-2">
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50">Prev</button>
+          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-3 py-1 border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50">Next</button>
+        </div>
+      </div>
+
+      {/* CSV Import Modal */}
+      {showCsvModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">Import CSV</h2>
+              <button onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvResult(null); }}><X size={18} /></button>
+            </div>
+
+            {csvResult ? (
+              <div className="space-y-2">
+                <p className="text-green-600 font-medium">Import complete!</p>
+                <p className="text-sm text-gray-600">Added: <strong>{csvResult.added}</strong> · Skipped: <strong>{csvResult.skipped}</strong> · Errors: <strong>{csvResult.errors}</strong></p>
+                <button onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvResult(null); }} className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Done</button>
+              </div>
+            ) : (
+              <>
+                <select value={csvCampaign} onChange={e => setCsvCampaign(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="">Select campaign…</option>
+                  {(campaigns as Campaign[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <div
+                  onClick={() => fileRef.current?.click()}
+                  className="border-2 border-dashed border-gray-300 rounded-xl py-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
+                >
+                  <Upload size={24} className="mx-auto text-gray-400 mb-2" />
+                  <p className="text-sm text-gray-600">{csvFile ? csvFile.name : 'Click to upload CSV'}</p>
+                  <p className="text-xs text-gray-400 mt-1">Columns: linkedin_url, first_name, last_name, company, title</p>
+                </div>
+                <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => setCsvFile(e.target.files?.[0] ?? null)} />
+                <button
+                  onClick={() => importMutation.mutate()}
+                  disabled={!csvCampaign || !csvFile || importMutation.isPending}
+                  className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                >
+                  {importMutation.isPending ? 'Importing…' : 'Import'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Add Lead Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900">Add Lead</h2>
+              <button onClick={() => setShowAddModal(false)}><X size={18} /></button>
+            </div>
+            {(['campaign_id', 'linkedin_url', 'first_name', 'last_name', 'company', 'title'] as const).map(field => (
+              <div key={field}>
+                {field === 'campaign_id' ? (
+                  <select value={addForm.campaign_id} onChange={e => setAddForm(f => ({ ...f, campaign_id: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                    <option value="">Select campaign…</option>
+                    {(campaigns as Campaign[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    placeholder={field.replace(/_/g, ' ')}
+                    value={addForm[field]}
+                    onChange={e => setAddForm(f => ({ ...f, [field]: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                )}
+              </div>
+            ))}
+            <button
+              onClick={() => addMutation.mutate()}
+              disabled={!addForm.campaign_id || !addForm.linkedin_url || addMutation.isPending}
+              className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40"
+            >
+              Add Lead
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
