@@ -1,10 +1,10 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-12T12:14:53.407Z",
+  "timestamp": "2026-05-12T12:23:01.497Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
-  "phase_name": null,
+  "phase_name": "Pre-execution (project initialized, no code yet)",
   "phase_dir": null,
   "plan": null,
   "task": null,
@@ -17,14 +17,38 @@
   "decisions": [],
   "uncommitted_files": [
     {
+      "status": "M",
+      "path": ".planning/HANDOFF.json"
+    },
+    {
       "status": "??",
       "path": ".claude/"
     },
     {
       "status": "??",
-      "path": ".planning/"
+      "path": ".planning/PROJECT.md"
+    },
+    {
+      "status": "??",
+      "path": ".planning/REQUIREMENTS.md"
+    },
+    {
+      "status": "??",
+      "path": ".planning/ROADMAP.md"
+    },
+    {
+      "status": "??",
+      "path": ".planning/STATE.md"
+    },
+    {
+      "status": "??",
+      "path": ".planning/config.json"
+    },
+    {
+      "status": "??",
+      "path": "CLAUDE.md"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\n072a6f0 Initial commit"
+  "context_notes": "Recent commits:\n03a6bbf Add GSD planning checkpoint\n072a6f0 Initial commit"
 }
