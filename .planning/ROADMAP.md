@@ -1,7 +1,7 @@
 # Roadmap: LinkedIn Outreach Automation Platform
 
 **Created:** 2026-05-12
-**Phases:** 3 | **Requirements:** 55 | **Mode:** Vertical MVP
+**Phases:** 4 | **Requirements:** 80 | **Mode:** Vertical MVP
 
 ---
 
@@ -9,9 +9,10 @@
 
 | # | Phase | Goal | Requirements | Status |
 |---|-------|------|--------------|--------|
-| 1 | Core Backend | Playwright + антидетект + API + БД | LIN, ANT, WRN, CMP, LED, TPL, API, INF | Pending |
-| 2 | Frontend Dashboard | React дашборд + WebSocket | FE-01..15, WSS-01..05 | Pending |
-| 3 | Polish & Deploy | Аналітика + Railway деплой + production-ready | FE-11..12, INF-01..03 | Pending |
+| 1 | Core Backend | Playwright + антидетект + API + БД | LIN, ANT, WRN, CMP, LED, TPL, API, INF | Complete |
+| 2 | Frontend Dashboard | React дашборд + WebSocket | FE-01..15, WSS-01..05 | Complete |
+| 3 | Polish & Deploy | Аналітика + Railway деплой + production-ready | FE-11..12, INF-01..03 | Complete |
+| 4 | Advanced Features | Smart Inbox + A/B + Multi-account + Branches + Email Discovery | ADV-01..25 | Complete |
 
 ---
 
@@ -153,17 +154,33 @@
 
 ---
 
-## Phase 4: Extras (Post-MVP)
+## Phase 4: Advanced Features
 
-**Goal:** Розширення платформи після валідації MVP
+**Goal:** Розширення платформи: Smart Inbox, A/B тестування, мульти-акаунт, умовні гілки в кампаніях, Email Discovery.
+**Mode:** mvp
 
-**Plans (не заплановані детально):**
-- Multi-account підтримка
-- Residential proxy інтеграція
-- Webhooks (Slack / Telegram)
-- A/B тестування шаблонів повідомлень
+**Requirements:** ADV-01..25
+
+**Plans:** 7 plans
+
+**Success Criteria:**
+1. Smart Inbox показує всі LinkedIn-переписки і дозволяє відповідати з дашборду
+2. A/B тест запускається для message step: 2 варіанти тексту, система рандомно роздає, показує winner по reply rate
+3. 2+ LinkedIn акаунти можна додати і призначити кожному кампанії — запускаються паралельно
+4. Campaign builder підтримує гілки: "Якщо прийняв" → дія A, "Якщо не прийняв через 7 днів" → дія B
+5. Email Discovery знаходить email по LinkedIn URL через Hunter.io/Apollo API і зберігає в lead профілі
+
+Plans:
+- [ ] 04-01-PLAN.md — Database Schema Migration (accounts, inbox_messages, ab_tests, campaign_steps branches, leads email)
+- [ ] 04-02-PLAN.md — Multi-Account Backend (AccountService, BrowserFactory, CampaignWorker multi-account, /api/accounts)
+- [ ] 04-03-PLAN.md — Conditional Branches Engine (BranchResolver service, CampaignWorker branch routing)
+- [ ] 04-04-PLAN.md — A/B Testing Engine (ABTestService, /api/ab-tests, CampaignWorker variant text selection)
+- [ ] 04-05-PLAN.md — Smart Inbox (LinkedInInboxService, InboxPoller cron, /api/inbox)
+- [ ] 04-06-PLAN.md — Email Discovery (Hunter.io + Apollo.io, /api/leads/:id/discover-email, settings API keys)
+- [ ] 04-07-PLAN.md — Frontend Advanced UI (AccountsPage, InboxPage, CampaignBuilder branches/AB, LeadsPage email, AnalyticsPage AB results)
 
 ---
 
 *Roadmap created: 2026-05-12*
-*Next: `/gsd:plan-phase 1` → Plan 1.1: Project Setup + Database*
+*Updated: 2026-05-13 — Added Phase 4: Advanced Features*
+*Updated: 2026-05-13 — Phase 4 plans finalized (7 plans, 3 waves)*
