@@ -73,6 +73,15 @@ if (fs.existsSync(publicDir)) {
   });
 }
 
+// Global error handler — catches any unhandled errors thrown in routes
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const message = err instanceof Error ? err.message : String(err);
+  logger.error('Unhandled route error', { error: message });
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 initDb();
 logger.info('Database initialized');
 

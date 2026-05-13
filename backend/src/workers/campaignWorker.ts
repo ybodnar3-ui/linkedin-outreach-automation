@@ -98,14 +98,14 @@ async function renderTemplate(template: string, lead: Lead): Promise<string> {
   return result;
 }
 
-async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
+async function checkCondition(condition: string, lead: Lead, accountId: string): Promise<boolean> {
   switch (condition) {
     case 'always':
       return true;
     case 'if_connected':
       if (lead.connected_at) return true;
-      // Check live if not tracked
-      const status = await checkConnectionStatus(lead.linkedin_url);
+      // Check live using the correct account's browser context
+      const status = await checkConnectionStatus(lead.linkedin_url, accountId);
       if (status === 'connected') {
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?')
           .run(Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), lead.id);
@@ -120,7 +120,7 @@ async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
 }
 
 async function executeStep(lead: Lead, step: CampaignStep, accountId: string): Promise<void> {
-  const conditionMet = await checkCondition(step.condition, lead);
+  const conditionMet = await checkCondition(step.condition, lead, accountId);
   if (!conditionMet) {
     logger.info('Condition not met, skipping step', { leadId: lead.id, step: step.step_order, condition: step.condition });
     db.prepare('UPDATE leads SET current_step = ?, next_action_at = ?, updated_at = ? WHERE id = ?')
@@ -201,7 +201,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
       break;
     }
     case 'check_connection': {
-      const connStatus = await checkConnectionStatus(lead.linkedin_url);
+      const connStatus = await checkConnectionStatus(lead.linkedin_url, accountId);
       if (connStatus === 'connected') {
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
         logger.info('Connection accepted', { leadId: lead.id });

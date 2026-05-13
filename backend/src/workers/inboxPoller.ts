@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { logger } from '../utils/logger';
 import { scrapeInbox } from '../services/inbox';
 import { getBrowser, getBrowserForAccount } from '../services/browser';
-import { listAccounts } from '../services/accounts';
+import { listAccounts, getAccountProxy } from '../services/accounts';
 import { broadcastLog } from '../index';
 
 let isPolling = false;
@@ -27,7 +27,8 @@ async function runInboxPoll(): Promise<void> {
     const accounts = listAccounts().filter(a => a.status === 'active');
     for (const account of accounts) {
       try {
-        const context = await getBrowserForAccount(account.id, account.session_file);
+        const proxy = getAccountProxy(account.id);
+        const context = await getBrowserForAccount(account.id, account.session_file, proxy);
         const count = await scrapeInbox(account.id, context);
         if (count > 0) {
           broadcastLog('inbox_new_messages', { accountId: account.id, count });

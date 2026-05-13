@@ -62,7 +62,8 @@ router.post('/', (req: Request, res: Response) => {
     if (err instanceof Error && err.message?.includes('UNIQUE')) {
       return res.status(409).json({ error: 'Lead already exists in this campaign' });
     }
-    throw err;
+    logger.error('Failed to insert lead', { error: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
