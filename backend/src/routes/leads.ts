@@ -91,6 +91,56 @@ router.post('/:id/skip', (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
+// GET /api/leads/export/csv — export all leads for a campaign as CSV
+router.get('/export/csv', (req: Request, res: Response) => {
+  const { campaign_id } = req.query;
+
+  let leads: Record<string, unknown>[];
+  if (campaign_id) {
+    leads = db.prepare('SELECT * FROM leads WHERE campaign_id = ? ORDER BY created_at ASC').all(campaign_id as string) as Record<string, unknown>[];
+  } else {
+    leads = db.prepare('SELECT * FROM leads ORDER BY created_at ASC').all() as Record<string, unknown>[];
+  }
+
+  if (leads.length === 0) {
+    return res.status(404).json({ error: 'No leads found' });
+  }
+
+  const COLUMNS = [
+    'id', 'campaign_id', 'linkedin_url',
+    'first_name', 'last_name', 'company', 'title', 'email',
+    'status', 'headline', 'location', 'years_at_company', 'school',
+    'skills', 'recent_post', 'mutual_connections', 'summary',
+    'connection_sent_at', 'connected_at', 'replied_at', 'last_message_at',
+    'created_at', 'updated_at',
+  ];
+
+  const escape = (val: unknown): string => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    // Wrap in quotes if contains comma, quote, or newline
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const header = COLUMNS.join(',');
+  const rows = leads.map(lead =>
+    COLUMNS.map(col => escape(lead[col])).join(',')
+  );
+
+  const csv = [header, ...rows].join('\n');
+  const filename = campaign_id
+    ? `leads-campaign-${campaign_id}-${Date.now()}.csv`
+    : `leads-all-${Date.now()}.csv`;
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  logger.info('Leads exported', { campaign_id: campaign_id ?? 'all', count: leads.length });
+  return res.send(csv);
+});
+
 router.post('/import/csv', upload.single('file'), async (req: Request, res: Response) => {
   const { campaign_id } = req.body;
   if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });

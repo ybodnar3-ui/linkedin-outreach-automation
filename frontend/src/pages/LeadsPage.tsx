@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search } from 'lucide-react';
+import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search, Download } from 'lucide-react';
 import { leadsApi, campaignsApi } from '../lib/api';
 
 interface Lead {
@@ -107,6 +107,15 @@ export function LeadsPage() {
         <div className="flex gap-2">
           <button onClick={() => setShowSalesNavModal(true)} className="flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors">
             <Search size={15} /> Sales Navigator
+          </button>
+          <button
+            onClick={() => {
+              const params = campaignFilter ? `?campaign_id=${campaignFilter}` : '';
+              window.open(`/api/leads/export/csv${params}`, '_blank');
+            }}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Download size={15} /> Export CSV
           </button>
           <button onClick={() => setShowCsvModal(true)} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors">
             <Upload size={15} /> Import CSV
