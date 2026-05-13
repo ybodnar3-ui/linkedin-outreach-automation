@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward, Mail } from 'lucide-react';
+import { Upload, Plus, X, SkipForward, Mail, Sparkles } from 'lucide-react';
 import { leadsApi, campaignsApi } from '../lib/api';
 
 interface Lead {
@@ -15,6 +15,15 @@ interface Lead {
   updated_at: number;
   email: string | null;
   email_status: 'pending' | 'found' | 'not_found' | null;
+  // enrichment
+  headline: string | null;
+  location: string | null;
+  years_at_company: string | null;
+  school: string | null;
+  skills: string | null;
+  recent_post: string | null;
+  mutual_connections: string | null;
+  enriched_at: number | null;
 }
 
 interface Campaign { id: string; name: string }
@@ -113,9 +122,24 @@ export function LeadsPage() {
             {leads.map(l => (
               <tr key={l.id} className="hover:bg-gray-50/50 transition-colors">
                 <td className="px-4 py-3">
-                  <a href={l.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">
-                    {[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}
-                  </a>
+                  <div className="flex items-center gap-1.5">
+                    <a href={l.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">
+                      {[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}
+                    </a>
+                    {l.enriched_at && (
+                      <span title={[
+                        l.headline && `Headline: ${l.headline}`,
+                        l.location && `Location: ${l.location}`,
+                        l.years_at_company && `Tenure: ${l.years_at_company}`,
+                        l.school && `School: ${l.school}`,
+                        l.skills && `Skills: ${l.skills}`,
+                        l.mutual_connections && `Mutual: ${l.mutual_connections}`,
+                      ].filter(Boolean).join('\n')}>
+                        <Sparkles size={11} className="text-purple-400 cursor-help" />
+                      </span>
+                    )}
+                  </div>
+                  {l.headline && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[180px]">{l.headline}</p>}
                 </td>
                 <td className="px-4 py-3 text-gray-600">{l.company || '—'}</td>
                 <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{l.title || '—'}</td>

@@ -141,6 +141,16 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'email_source', "TEXT CHECK(email_source IN ('hunter','apollo','manual'))");
   addColumnIfNotExists('leads', 'email_found_at', 'INTEGER');
   addColumnIfNotExists('leads', 'email_status', "TEXT NOT NULL DEFAULT 'pending'");
+  // enrichment fields scraped from LinkedIn profile
+  addColumnIfNotExists('leads', 'headline', 'TEXT');
+  addColumnIfNotExists('leads', 'summary', 'TEXT');
+  addColumnIfNotExists('leads', 'location', 'TEXT');
+  addColumnIfNotExists('leads', 'years_at_company', 'TEXT');
+  addColumnIfNotExists('leads', 'school', 'TEXT');
+  addColumnIfNotExists('leads', 'recent_post', 'TEXT');
+  addColumnIfNotExists('leads', 'mutual_connections', 'TEXT');
+  addColumnIfNotExists('leads', 'skills', 'TEXT');
+  addColumnIfNotExists('leads', 'enriched_at', 'INTEGER');
 
   // accounts health migrations
   addColumnIfNotExists('accounts', 'health_score', 'INTEGER NOT NULL DEFAULT 100');

@@ -41,7 +41,13 @@ const ACTION_COLORS: Record<ActionType, string> = {
   wait: 'bg-gray-50 border-gray-200',
 };
 
-const TEMPLATE_VARS = ['{firstName}', '{lastName}', '{company}', '{title}', '{myName}'];
+const TEMPLATE_VARS = [
+  // Basic
+  '{firstName}', '{lastName}', '{company}', '{title}', '{myName}',
+  // Enrichment — auto-filled after visitProfile step runs
+  '{headline}', '{location}', '{yearsAtCompany}', '{school}',
+  '{skills}', '{recentPost}', '{mutualConnections}', '{summary}',
+];
 
 function SortableStep({ step, onChange, onDelete }: {
   step: Step;

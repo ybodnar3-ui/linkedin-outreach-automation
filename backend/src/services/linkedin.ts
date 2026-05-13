@@ -2,6 +2,7 @@ import { Page } from 'playwright';
 import { getBrowser, loadSession } from './browser';
 import { incrementTracker } from './storage';
 import { applyHealthPenalty, incrementAccountTracker } from './accountHealth';
+import { scrapeProfileFields, saveEnrichedProfile } from './profileEnricher';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 
@@ -52,7 +53,11 @@ export async function checkForWarnings(page: Page): Promise<WarningResult> {
   return { hasWarning: false };
 }
 
-export async function visitProfile(linkedinUrl: string, accountId = '__legacy__'): Promise<void> {
+export async function visitProfile(
+  linkedinUrl: string,
+  accountId = '__legacy__',
+  leadId?: string,
+): Promise<void> {
   const { gaussianDelay, humanScroll } = await import('../utils/humanizer');
   const page = await getPage();
 
@@ -75,6 +80,16 @@ export async function visitProfile(linkedinUrl: string, accountId = '__legacy__'
 
     await humanScroll(page);
     await gaussianDelay(2000, 4000);
+
+    // Scrape enrichment fields while page is open
+    if (leadId) {
+      try {
+        const enriched = await scrapeProfileFields(page);
+        saveEnrichedProfile(leadId, enriched);
+      } catch (err) {
+        logger.warn('Profile enrichment failed (non-fatal)', { leadId, error: String(err) });
+      }
+    }
 
     incrementTracker('profiles_visited');
     incrementAccountTracker(accountId, 'profiles_visited');

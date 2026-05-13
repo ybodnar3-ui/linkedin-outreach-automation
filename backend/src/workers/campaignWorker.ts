@@ -48,6 +48,15 @@ interface Lead {
   connection_sent_at: number | null;
   connected_at: number | null;
   last_message_at: number | null;
+  // Enrichment fields
+  headline: string | null;
+  summary: string | null;
+  location: string | null;
+  years_at_company: string | null;
+  school: string | null;
+  recent_post: string | null;
+  mutual_connections: string | null;
+  skills: string | null;
 }
 
 function renderTemplate(template: string, lead: Lead): string {
@@ -57,7 +66,16 @@ function renderTemplate(template: string, lead: Lead): string {
     .replace(/\{lastName\}/g, lead.last_name || '')
     .replace(/\{company\}/g, lead.company || '')
     .replace(/\{title\}/g, lead.title || '')
-    .replace(/\{myName\}/g, myName);
+    .replace(/\{myName\}/g, myName)
+    // Enrichment variables
+    .replace(/\{headline\}/g, lead.headline || '')
+    .replace(/\{summary\}/g, lead.summary || '')
+    .replace(/\{location\}/g, lead.location || '')
+    .replace(/\{yearsAtCompany\}/g, lead.years_at_company || '')
+    .replace(/\{school\}/g, lead.school || '')
+    .replace(/\{recentPost\}/g, lead.recent_post || '')
+    .replace(/\{mutualConnections\}/g, lead.mutual_connections || '')
+    .replace(/\{skills\}/g, lead.skills || '');
 }
 
 async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
@@ -98,7 +116,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         logger.info('Daily visit limit reached', { accountId });
         return;
       }
-      await visitProfile(lead.linkedin_url, accountId);
+      await visitProfile(lead.linkedin_url, accountId, lead.id);
       await actionDelay();
       break;
     }
