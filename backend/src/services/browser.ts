@@ -95,13 +95,24 @@ export async function isSessionActive(): Promise<boolean> {
 // ---- Multi-account browser factory ----
 const _accountBrowsers = new Map<string, { browser: Browser; context: BrowserContext }>();
 
-export async function getBrowserForAccount(accountId: string, sessionFile: string): Promise<BrowserContext> {
+interface ProxyConfig {
+  server: string;      // e.g. http://host:port
+  username?: string;
+  password?: string;
+}
+
+export async function getBrowserForAccount(
+  accountId: string,
+  sessionFile: string,
+  proxy?: ProxyConfig,
+): Promise<BrowserContext> {
   const existing = _accountBrowsers.get(accountId);
   if (existing) return existing.context;
 
   const browser = await chromium.launch({
     headless: true,
     args: [...BROWSER_CONFIG.args],
+    proxy: proxy ? { server: proxy.server } : undefined,
   });
 
   const context = await browser.newContext({
@@ -110,6 +121,7 @@ export async function getBrowserForAccount(accountId: string, sessionFile: strin
     locale: BROWSER_CONFIG.locale,
     timezoneId: BROWSER_CONFIG.timezoneId,
     extraHTTPHeaders: BROWSER_CONFIG.extraHTTPHeaders,
+    proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
   });
 
   await context.addInitScript(() => {

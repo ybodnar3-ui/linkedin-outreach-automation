@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { createAccount, listAccounts, getAccount, deleteAccount, updateAccountStatus } from '../services/accounts';
+import { createAccount, listAccounts, getAccount, deleteAccount, updateAccountStatus, updateAccountProxy } from '../services/accounts';
 import { startManualLoginForAccount } from '../services/browser';
 import { getAccountHealthInfo } from '../services/accountHealth';
 
@@ -31,6 +31,20 @@ router.delete('/:id', (req: Request, res: Response) => {
   const account = getAccount(req.params.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
   deleteAccount(req.params.id);
+  return res.json({ ok: true });
+});
+
+// PUT /api/accounts/:id/proxy — set proxy config (pass null values to clear)
+router.put('/:id/proxy', (req: Request, res: Response) => {
+  const account = getAccount(req.params.id);
+  if (!account) return res.status(404).json({ error: 'Not found' });
+  const { host, port, user, password } = req.body;
+  updateAccountProxy(req.params.id, {
+    host: host || null,
+    port: port || null,
+    user: user || null,
+    password: password || null,
+  });
   return res.json({ ok: true });
 });
 

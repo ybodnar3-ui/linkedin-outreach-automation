@@ -155,6 +155,11 @@ export function initDb(): void {
 
   // accounts health migrations
   addColumnIfNotExists('accounts', 'health_score', 'INTEGER NOT NULL DEFAULT 100');
+  // accounts proxy migrations
+  addColumnIfNotExists('accounts', 'proxy_host', 'TEXT');
+  addColumnIfNotExists('accounts', 'proxy_port', 'TEXT');
+  addColumnIfNotExists('accounts', 'proxy_user', 'TEXT');
+  addColumnIfNotExists('accounts', 'proxy_password', 'TEXT');
 
   // per-account daily tracker table
   db.exec(`

@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Wifi, WifiOff, Trash2, ShieldCheck, ShieldAlert, Flame } from 'lucide-react';
+import { Plus, Wifi, WifiOff, Trash2, ShieldCheck, ShieldAlert, Flame, Globe } from 'lucide-react';
 import { accountsApi } from '../lib/api';
+
+interface ProxyInfo {
+  host: string;
+  port: string;
+  user: string;
+  password: string;
+}
 
 interface HealthInfo {
   healthScore: number;
@@ -23,6 +30,9 @@ interface Account {
   status: 'disconnected' | 'active' | 'error';
   created_at: number;
   health: HealthInfo;
+  proxy_host: string | null;
+  proxy_port: string | null;
+  proxy_user: string | null;
 }
 
 const STATUS_CONFIG = {
@@ -54,6 +64,7 @@ export function AccountsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', email: '' });
+  const [proxyForms, setProxyForms] = useState<Record<string, ProxyInfo>>({});
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['accounts'],
@@ -72,6 +83,16 @@ export function AccountsPage() {
 
   const loginMutation = useMutation({
     mutationFn: (id: string) => accountsApi.login(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  const proxyMutation = useMutation({
+    mutationFn: ({ id, proxy }: { id: string; proxy: ProxyInfo }) => accountsApi.setProxy(id, proxy),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  const clearProxyMutation = useMutation({
+    mutationFn: (id: string) => accountsApi.clearProxy(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 
@@ -203,6 +224,57 @@ export function AccountsPage() {
                     <p className="text-xs text-gray-400 mt-2">
                       Health recovers +5/day when no warnings detected. Penalties: CAPTCHA −30, Warning −20, Restriction −50.
                     </p>
+
+                    {/* Proxy config */}
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                        <Globe size={11} /> Proxy Configuration
+                      </p>
+                      {account.proxy_host ? (
+                        <div className="flex items-center justify-between bg-blue-50 rounded-lg p-2">
+                          <div>
+                            <p className="text-xs font-medium text-blue-800">{account.proxy_host}:{account.proxy_port || '8080'}</p>
+                            {account.proxy_user && <p className="text-xs text-blue-600">{account.proxy_user}</p>}
+                          </div>
+                          <button
+                            onClick={() => clearProxyMutation.mutate(account.id)}
+                            disabled={clearProxyMutation.isPending}
+                            className="text-xs px-2 py-1 text-red-600 hover:text-red-800 border border-red-200 rounded"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {(() => {
+                            const pf = proxyForms[account.id] ?? { host: '', port: '8080', user: '', password: '' };
+                            const setPf = (upd: Partial<ProxyInfo>) => setProxyForms(prev => ({ ...prev, [account.id]: { ...pf, ...upd } }));
+                            return (
+                              <>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input value={pf.host} onChange={e => setPf({ host: e.target.value })}
+                                    placeholder="proxy host" className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                                  <input value={pf.port} onChange={e => setPf({ port: e.target.value })}
+                                    placeholder="port" className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                                  <input value={pf.user} onChange={e => setPf({ user: e.target.value })}
+                                    placeholder="username (opt)" className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                                  <input type="password" value={pf.password} onChange={e => setPf({ password: e.target.value })}
+                                    placeholder="password (opt)" className="border border-gray-200 rounded px-2 py-1 text-xs" />
+                                </div>
+                                <button
+                                  disabled={!pf.host || proxyMutation.isPending}
+                                  onClick={() => proxyMutation.mutate({ id: account.id, proxy: pf })}
+                                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+                                >
+                                  Save Proxy
+                                </button>
+                                <p className="text-xs text-gray-400">e.g. Brightdata / Smartproxy residential IP for this account</p>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
