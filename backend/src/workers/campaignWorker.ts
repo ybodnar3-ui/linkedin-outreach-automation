@@ -8,6 +8,7 @@ import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
+import { generateIcebreaker } from '../services/icebreaker';
 
 const runningAccounts = new Set<string>();
 
@@ -59,9 +60,9 @@ interface Lead {
   skills: string | null;
 }
 
-function renderTemplate(template: string, lead: Lead): string {
+async function renderTemplate(template: string, lead: Lead): Promise<string> {
   const myName = getSetting('my_name') || '';
-  return template
+  let result = template
     .replace(/\{firstName\}/g, lead.first_name || '')
     .replace(/\{lastName\}/g, lead.last_name || '')
     .replace(/\{company\}/g, lead.company || '')
@@ -76,6 +77,22 @@ function renderTemplate(template: string, lead: Lead): string {
     .replace(/\{recentPost\}/g, lead.recent_post || '')
     .replace(/\{mutualConnections\}/g, lead.mutual_connections || '')
     .replace(/\{skills\}/g, lead.skills || '');
+
+  // AI Icebreaker — only call API if the template actually uses {icebreaker}
+  if (result.includes('{icebreaker}')) {
+    const icebreaker = await generateIcebreaker({
+      firstName: lead.first_name || '',
+      headline: lead.headline,
+      company: lead.company,
+      title: lead.title,
+      recentPost: lead.recent_post,
+      skills: lead.skills,
+      location: lead.location,
+    });
+    result = result.replace(/\{icebreaker\}/g, icebreaker);
+  }
+
+  return result;
 }
 
 async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
@@ -130,7 +147,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
       if (step.ab_test_id && rawNote) {
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
       }
-      const note = rawNote ? renderTemplate(rawNote, lead) : undefined;
+      const note = rawNote ? await renderTemplate(rawNote, lead) : undefined;
       const sent = await sendConnectionRequest(lead.linkedin_url, note, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -152,7 +169,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         broadcastLog('limit_reached', { action: 'message', accountId });
         return;
       }
-      const text = renderTemplate(rawText, lead);
+      const text = await renderTemplate(rawText, lead);
       const sent = await sendMessage(lead.linkedin_url, text, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);

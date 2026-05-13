@@ -5,8 +5,9 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
-const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working_hours_end'];
-const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery'];
+const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working_hours_end', 'icebreaker_enabled'];
+const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery', 'openai_api_key', 'anthropic_api_key'];
+const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key'];
 
 router.get('/', (_req: Request, res: Response) => {
   const settings: Record<string, string | null> = {};
@@ -14,9 +15,11 @@ router.get('/', (_req: Request, res: Response) => {
     settings[key] = getSetting(key);
   }
   // API keys — return masked values for security
-  settings['hunter_api_key'] = getSetting('hunter_api_key') ? '***' : '';
-  settings['apollo_api_key'] = getSetting('apollo_api_key') ? '***' : '';
+  for (const key of MASKED_KEYS) {
+    settings[key] = getSetting(key) ? '***' : '';
+  }
   settings['auto_email_discovery'] = getSetting('auto_email_discovery') || 'false';
+  settings['icebreaker_enabled'] = getSetting('icebreaker_enabled') || '0';
   return res.json(settings);
 });
 
