@@ -163,6 +163,16 @@ export function initDb(): void {
   addColumnIfNotExists('accounts', 'proxy_user', 'TEXT');
   addColumnIfNotExists('accounts', 'proxy_password', 'TEXT');
 
+  // blacklist table — domains and company names to never contact
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blacklist (
+      id TEXT PRIMARY KEY,
+      value TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL DEFAULT 'domain',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+  `);
+
   // per-account daily tracker table
   db.exec(`
     CREATE TABLE IF NOT EXISTS account_daily_tracker (

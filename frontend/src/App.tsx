@@ -12,6 +12,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { InboxPage } from './pages/InboxPage';
+import { BlacklistPage } from './pages/BlacklistPage';
 
 function App() {
   useEffect(() => {
@@ -34,6 +35,7 @@ function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/blacklist" element={<BlacklistPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

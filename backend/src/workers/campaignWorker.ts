@@ -99,6 +99,29 @@ async function renderTemplate(template: string, lead: Lead): Promise<string> {
   return result;
 }
 
+/** Returns the matched blacklist value if lead's company/email domain is blacklisted, else null */
+function checkBlacklist(lead: Lead): string | null {
+  const entries = db.prepare('SELECT value, type FROM blacklist').all() as Array<{ value: string; type: string }>;
+  if (entries.length === 0) return null;
+
+  const companyLower = (lead.company ?? '').toLowerCase();
+  const emailDomain = lead.email ? lead.email.split('@')[1]?.toLowerCase() : null;
+  const linkedinDomain = (() => {
+    try { return new URL(lead.linkedin_url).hostname.toLowerCase(); } catch { return null; }
+  })();
+
+  for (const { value, type } of entries) {
+    if (type === 'domain') {
+      if (emailDomain && (emailDomain === value || emailDomain.endsWith(`.${value}`))) return value;
+      if (linkedinDomain && linkedinDomain.includes(value)) return value;
+    }
+    if (type === 'company') {
+      if (companyLower.includes(value)) return value;
+    }
+  }
+  return null;
+}
+
 async function checkCondition(condition: string, lead: Lead, accountId: string): Promise<boolean> {
   switch (condition) {
     case 'always':
@@ -272,6 +295,16 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string)
       .run(Math.floor(Date.now() / 1000), lead.id);
     logger.info('Lead completed all steps', { leadId: lead.id });
     broadcastLog('lead_completed', { leadId: lead.id, url: lead.linkedin_url });
+    return;
+  }
+
+  // Blacklist check — skip if company domain or company name is blacklisted
+  const blacklistHit = checkBlacklist(lead);
+  if (blacklistHit) {
+    db.prepare("UPDATE leads SET status = 'skipped', skip_reason = ?, updated_at = ? WHERE id = ?")
+      .run(`blacklisted:${blacklistHit}`, Math.floor(Date.now() / 1000), lead.id);
+    logger.info('Lead skipped — blacklisted', { leadId: lead.id, match: blacklistHit });
+    broadcastLog('lead_skipped', { leadId: lead.id, reason: `blacklisted:${blacklistHit}` });
     return;
   }
 

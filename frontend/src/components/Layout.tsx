@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Megaphone, Users, BarChart2, Settings, UserCircle, Inbox } from 'lucide-react';
+import { LayoutDashboard, Megaphone, Users, BarChart2, Settings, UserCircle, Inbox, ShieldOff } from 'lucide-react';
 
 const nav = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -8,6 +8,7 @@ const nav = [
   { to: '/inbox', icon: Inbox, label: 'Inbox' },
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
   { to: '/accounts', icon: UserCircle, label: 'Accounts' },
+  { to: '/blacklist', icon: ShieldOff, label: 'Blacklist' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
