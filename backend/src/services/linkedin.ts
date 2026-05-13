@@ -268,6 +268,59 @@ export async function sendMessage(linkedinUrl: string, text: string, accountId =
   }
 }
 
+/**
+ * Follow a LinkedIn profile (without sending a connection request).
+ * Useful as a softer first touchpoint before connecting.
+ * Returns true if the Follow button was found and clicked.
+ */
+export async function followProfile(linkedinUrl: string, accountId = '__legacy__'): Promise<boolean> {
+  const { gaussianDelay, humanMouseMove } = await import('../utils/humanizer');
+  const page = await getPage(accountId);
+
+  try {
+    await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gaussianDelay(1500, 3000);
+
+    const warning = await checkForWarnings(page);
+    if (warning.hasWarning) {
+      logger.warn('Warning detected during follow', warning);
+      broadcastLog('warning', warning);
+      if (warning.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warning.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
+      return false;
+    }
+
+    // LinkedIn shows "Follow" button for 2nd/3rd degree connections (not yet connected)
+    const followBtn = await page.$(
+      'button[aria-label*="Follow"], button[aria-label*="follow"]:not([aria-label*="Unfollow"])',
+    );
+    if (!followBtn) {
+      logger.info('No Follow button found (already following or connected)', { url: linkedinUrl });
+      return false;
+    }
+
+    await humanMouseMove(page, followBtn);
+    await gaussianDelay(400, 900);
+    await followBtn.click();
+    await gaussianDelay(1000, 2000);
+
+    // Verify the button changed to "Following" or "Unfollow"
+    const unfollowBtn = await page.$('button[aria-label*="Unfollow"], button[aria-label*="Following"]');
+    if (unfollowBtn) {
+      incrementAccountTracker(accountId, 'profiles_visited'); // counts as a profile interaction
+      logger.info('Profile followed', { url: linkedinUrl, accountId });
+      broadcastLog('profile_followed', { url: linkedinUrl, accountId });
+      return true;
+    }
+
+    logger.warn('Follow click did not result in Unfollow state', { url: linkedinUrl });
+    return false;
+  } finally {
+    await page.close();
+  }
+}
+
 export async function checkConnectionStatus(linkedinUrl: string, accountId = '__legacy__'): Promise<'connected' | 'pending' | 'none'> {
   const { gaussianDelay } = await import('../utils/humanizer');
   const page = await getPage(accountId);

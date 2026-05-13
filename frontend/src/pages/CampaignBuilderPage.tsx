@@ -13,7 +13,7 @@ import { Plus, GripVertical, Trash2, ArrowLeft } from 'lucide-react';
 import { campaignsApi } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
 
-type ActionType = 'visit' | 'connect' | 'message' | 'check_connection' | 'wait' | 'send_email';
+type ActionType = 'visit' | 'follow' | 'connect' | 'message' | 'check_connection' | 'wait' | 'send_email';
 type Condition = 'always' | 'if_connected' | 'if_not_replied';
 
 interface Step {
@@ -28,6 +28,7 @@ interface Step {
 
 const ACTION_LABELS: Record<ActionType, string> = {
   visit: 'Visit Profile',
+  follow: 'Follow Profile',
   connect: 'Send Connection',
   message: 'Send Message',
   check_connection: 'Check Connection',
@@ -37,6 +38,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
 
 const ACTION_COLORS: Record<ActionType, string> = {
   visit: 'bg-blue-50 border-blue-200',
+  follow: 'bg-sky-50 border-sky-200',
   connect: 'bg-green-50 border-green-200',
   message: 'bg-purple-50 border-purple-200',
   check_connection: 'bg-yellow-50 border-yellow-200',

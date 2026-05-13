@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 import { isWithinWorkingHours } from '../utils/delays';
 import { canAccountPerformAction, runNightlyHealthBonus } from '../services/accountHealth';
-import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus } from '../services/linkedin';
+import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
@@ -138,6 +138,16 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         return;
       }
       await visitProfile(lead.linkedin_url, accountId, lead.id);
+      await actionDelay();
+      break;
+    }
+    case 'follow': {
+      // Follow without connecting — softer first touchpoint
+      if (!canAccountPerformAction(accountId, 'visit')) {
+        logger.info('Daily visit limit reached (follow)', { accountId });
+        return;
+      }
+      await followProfile(lead.linkedin_url, accountId);
       await actionDelay();
       break;
     }
