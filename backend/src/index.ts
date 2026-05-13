@@ -4,7 +4,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
-import { initDb } from './services/storage';
+import { initDb, db } from './services/storage';
 import { logger } from './utils/logger';
 import campaignsRouter from './routes/campaigns';
 import leadsRouter from './routes/leads';
@@ -39,10 +39,11 @@ wss.on('connection', (ws) => {
 
 app.get('/api/health', (_req, res) => {
   // first_run = true when no accounts AND no default session cookie file
-  const sessionFile = require('path').join(process.cwd(), '..', 'data', 'sessions', 'default.json');
-  const hasSession = require('fs').existsSync(sessionFile);
-  const { db } = require('./services/storage');
+  // browser.ts saves the default session to 'linkedin.json'
+  const sessionFile = path.join(process.cwd(), '..', 'data', 'sessions', 'linkedin.json');
+  const hasSession = fs.existsSync(sessionFile);
   const accountCount = (db.prepare('SELECT COUNT(*) as c FROM accounts').get() as { c: number }).c;
+  logger.debug('Health check', { accountCount, hasSession, first_run: accountCount === 0 && !hasSession });
   res.json({ status: 'ok', ts: Date.now(), first_run: accountCount === 0 && !hasSession });
 });
 
@@ -56,7 +57,6 @@ app.use('/api/ab-tests', abTestsRouter);
 
 // Pause all campaigns emergency endpoint
 app.post('/api/pause-all', (_req, res) => {
-  const { db } = require('./services/storage');
   db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE status = 'active'")
     .run(Math.floor(Date.now() / 1000));
   logger.warn('All campaigns paused via emergency stop');

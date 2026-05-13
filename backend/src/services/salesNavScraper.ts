@@ -31,6 +31,7 @@ export async function scrapeSalesNav(
   searchUrl: string,
   maxLeads = 25,
 ): Promise<SalesNavImportResult> {
+  const cappedMaxLeads = Math.min(Math.max(1, maxLeads), 100); // server-side cap: 1–100
   const errors: string[] = [];
   const leads: ScrapedLead[] = [];
 
@@ -47,7 +48,7 @@ export async function scrapeSalesNav(
   const page = await ctx.newPage();
 
   try {
-    logger.info('Sales Nav import started', { searchUrl, maxLeads });
+    logger.info('Sales Nav import started', { searchUrl, maxLeads: cappedMaxLeads });
 
     await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 45_000 });
     await page.waitForTimeout(3000);
@@ -119,7 +120,7 @@ export async function scrapeSalesNav(
 
     logger.info('Sales Nav cards found', { count: cards.length });
 
-    for (const cardJson of cards.slice(0, maxLeads)) {
+    for (const cardJson of cards.slice(0, cappedMaxLeads)) {
       try {
         const card = JSON.parse(cardJson) as { name: string; title: string; company: string; href: string };
 

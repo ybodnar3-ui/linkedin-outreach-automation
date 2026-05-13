@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
-import { getBrowser, loadSession } from './browser';
+import { getBrowser, loadSession, getBrowserForAccount } from './browser';
+import { getAccountProxy } from './accounts';
 import { incrementTracker } from './storage';
 import { applyHealthPenalty, incrementAccountTracker } from './accountHealth';
 import { scrapeProfileFields, saveEnrichedProfile } from './profileEnricher';
@@ -8,14 +9,33 @@ import { broadcastLog } from '../index';
 
 const LINKEDIN_BASE = 'https://www.linkedin.com';
 
-async function getPage(): Promise<Page> {
-  const ctx = await getBrowser();
-  const cookies = loadSession();
-  if (cookies) {
-    await ctx.addCookies(cookies).catch(() => {});
+/**
+ * Returns a new Playwright page for the given account.
+ * For __legacy__ (default session) uses the shared browser context.
+ * For real accounts uses per-account browser context with proxy support.
+ */
+async function getPage(accountId = '__legacy__'): Promise<Page> {
+  if (accountId === '__legacy__') {
+    const ctx = await getBrowser();
+    const cookies = loadSession();
+    if (cookies) {
+      await ctx.addCookies(cookies).catch(() => {});
+    }
+    return ctx.newPage();
   }
-  const page = await ctx.newPage();
-  return page;
+
+  // Per-account browser with proxy
+  const { getAccount } = await import('./accounts');
+  const account = getAccount(accountId);
+  if (!account) {
+    logger.error('getPage: account not found, falling back to legacy', { accountId });
+    const ctx = await getBrowser();
+    return ctx.newPage();
+  }
+
+  const proxy = getAccountProxy(accountId);
+  const ctx = await getBrowserForAccount(accountId, account.session_file, proxy);
+  return ctx.newPage();
 }
 
 export interface WarningResult {
@@ -59,7 +79,7 @@ export async function visitProfile(
   leadId?: string,
 ): Promise<void> {
   const { gaussianDelay, humanScroll } = await import('../utils/humanizer');
-  const page = await getPage();
+  const page = await getPage(accountId);
 
   try {
     logger.info('Visiting profile', { url: linkedinUrl });
@@ -101,7 +121,7 @@ export async function visitProfile(
 
 export async function sendConnectionRequest(linkedinUrl: string, note?: string, accountId = '__legacy__'): Promise<boolean> {
   const { gaussianDelay, humanMouseMove, humanType } = await import('../utils/humanizer');
-  const page = await getPage();
+  const page = await getPage(accountId);
 
   try {
     await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -184,7 +204,7 @@ export async function sendConnectionRequest(linkedinUrl: string, note?: string, 
 
 export async function sendMessage(linkedinUrl: string, text: string, accountId = '__legacy__'): Promise<boolean> {
   const { gaussianDelay, humanMouseMove, humanType } = await import('../utils/humanizer');
-  const page = await getPage();
+  const page = await getPage(accountId);
 
   try {
     await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -192,7 +212,11 @@ export async function sendMessage(linkedinUrl: string, text: string, accountId =
 
     const warning = await checkForWarnings(page);
     if (warning.hasWarning) {
+      logger.warn('Warning detected before sending message', warning);
       broadcastLog('warning', warning);
+      if (warning.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warning.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
       return false;
     }
 
@@ -244,9 +268,9 @@ export async function sendMessage(linkedinUrl: string, text: string, accountId =
   }
 }
 
-export async function checkConnectionStatus(linkedinUrl: string): Promise<'connected' | 'pending' | 'none'> {
+export async function checkConnectionStatus(linkedinUrl: string, accountId = '__legacy__'): Promise<'connected' | 'pending' | 'none'> {
   const { gaussianDelay } = await import('../utils/humanizer');
-  const page = await getPage();
+  const page = await getPage(accountId);
 
   try {
     await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });

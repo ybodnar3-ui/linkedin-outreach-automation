@@ -270,19 +270,32 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string)
   await executeStep(lead, step, accountId);
 }
 
-async function runWorkerCycle(): Promise<void> {
-  const key = '__legacy__';
-  if (runningAccounts.has(key)) return;
-  runningAccounts.add(key);
+/** Process all campaigns for a given accountId (or __legacy__ for unassigned campaigns) */
+async function runCampaignsForAccount(accountId: string): Promise<void> {
+  if (runningAccounts.has(accountId)) {
+    logger.debug('Worker already running for account, skipping', { accountId });
+    return;
+  }
+  runningAccounts.add(accountId);
+
+  const isLegacy = accountId === '__legacy__';
+  const campaignQuery = isLegacy
+    ? "SELECT * FROM campaigns WHERE status = 'active' AND account_id IS NULL"
+    : "SELECT * FROM campaigns WHERE status = 'active' AND account_id = ?";
 
   try {
-    const activeCampaigns = db.prepare(
-      "SELECT * FROM campaigns WHERE status = 'active' AND (account_id IS NULL)"
-    ).all() as Campaign[];
+    const activeCampaigns = (
+      isLegacy
+        ? db.prepare(campaignQuery).all()
+        : db.prepare(campaignQuery).all(accountId)
+    ) as Campaign[];
+
+    if (activeCampaigns.length === 0) return;
+    logger.debug('Active campaigns found for account', { accountId, count: activeCampaigns.length });
 
     for (const campaign of activeCampaigns) {
       if (!isWithinWorkingHours(campaign.timezone)) {
-        logger.info('Outside working hours, skipping campaign', { campaignId: campaign.id, timezone: campaign.timezone });
+        logger.info('Outside working hours, skipping campaign', { campaignId: campaign.id, accountId, timezone: campaign.timezone });
         continue;
       }
 
@@ -303,12 +316,13 @@ async function runWorkerCycle(): Promise<void> {
 
       for (const lead of leads) {
         try {
-          broadcastLog('lead_processing', { leadId: lead.id, url: lead.linkedin_url, campaign: campaign.name });
-          await processLead(lead, steps, key);
+          broadcastLog('lead_processing', { leadId: lead.id, url: lead.linkedin_url, campaign: campaign.name, accountId });
+          await processLead(lead, steps, accountId);
           await leadDelay();
         } catch (err) {
           logger.error('Error processing lead', {
             leadId: lead.id,
+            accountId,
             error: err instanceof Error ? err.message : String(err),
           });
           broadcastLog('lead_error', { leadId: lead.id, error: err instanceof Error ? err.message : String(err) });
@@ -316,10 +330,23 @@ async function runWorkerCycle(): Promise<void> {
       }
     }
   } catch (err) {
-    logger.error('Worker cycle error', { error: err instanceof Error ? err.message : String(err) });
+    logger.error('Worker cycle error', { accountId, error: err instanceof Error ? err.message : String(err) });
   } finally {
-    runningAccounts.delete(key);
+    runningAccounts.delete(accountId);
   }
+}
+
+async function runWorkerCycle(): Promise<void> {
+  // 1. Run legacy (unassigned) campaigns
+  await runCampaignsForAccount('__legacy__');
+
+  // 2. Run per-account campaigns for all active accounts
+  const activeAccounts = db.prepare("SELECT id FROM accounts WHERE status = 'active'")
+    .all() as Array<{ id: string }>;
+
+  await Promise.allSettled(
+    activeAccounts.map(({ id }) => runCampaignsForAccount(id)),
+  );
 }
 
 export function pauseAllCampaigns(): void {
