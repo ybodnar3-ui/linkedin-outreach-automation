@@ -4,8 +4,9 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { Activity, Link, Users, Wifi, WifiOff, OctagonX } from 'lucide-react';
-import { analyticsApi, campaignsApi, settingsApi } from '../lib/api';
+import { analyticsApi, campaignsApi, settingsApi, accountsApi } from '../lib/api';
 import { wsClient, WsEvent } from '../lib/ws';
+import { OnboardingWizard } from '../components/OnboardingWizard';
 
 interface LogEntry { ts: number; event: string; message: string }
 
@@ -27,9 +28,20 @@ export function DashboardPage() {
   const { data: overview } = useQuery({ queryKey: ['analytics', 'overview'], queryFn: analyticsApi.overview, refetchInterval: 30_000 });
   const { data: daily } = useQuery({ queryKey: ['analytics', 'daily', 7], queryFn: () => analyticsApi.daily(7) });
   const { data: session } = useQuery({ queryKey: ['settings', 'session'], queryFn: settingsApi.session, refetchInterval: 60_000 });
+  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsApi.list });
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Show onboarding wizard on first run (no accounts + no session)
+  const isFirstRun = (accounts as unknown[]).length === 0 && !session?.active;
+  const [wizardDismissed, setWizardDismissed] = useState(() => localStorage.getItem('onboarding_done') === '1');
+  const showWizard = isFirstRun && !wizardDismissed;
+
+  function handleDismiss() {
+    localStorage.setItem('onboarding_done', '1');
+    setWizardDismissed(true);
+  }
 
   useEffect(() => {
     const unsub = wsClient.subscribe((evt: WsEvent) => {
@@ -55,6 +67,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {showWizard && <OnboardingWizard onDismiss={handleDismiss} />}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
         <div className="flex items-center gap-3">

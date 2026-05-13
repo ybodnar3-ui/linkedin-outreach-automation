@@ -38,7 +38,12 @@ wss.on('connection', (ws) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', ts: Date.now() });
+  // first_run = true when no accounts AND no default session cookie file
+  const sessionFile = require('path').join(process.cwd(), '..', 'data', 'sessions', 'default.json');
+  const hasSession = require('fs').existsSync(sessionFile);
+  const { db } = require('./services/storage');
+  const accountCount = (db.prepare('SELECT COUNT(*) as c FROM accounts').get() as { c: number }).c;
+  res.json({ status: 'ok', ts: Date.now(), first_run: accountCount === 0 && !hasSession });
 });
 
 app.use('/api/campaigns', campaignsRouter);
