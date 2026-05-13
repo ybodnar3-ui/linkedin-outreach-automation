@@ -28,11 +28,11 @@ router.post('/', (req: Request, res: Response) => {
     .run(id, name, timezone, 'draft', now, now);
 
   const insertStep = db.prepare(
-    'INSERT INTO campaign_steps (id, campaign_id, step_order, action, wait_days, condition, message_text) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO campaign_steps (id, campaign_id, step_order, action, wait_days, condition, message_text, email_subject) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
 
   for (const step of steps) {
-    insertStep.run(uuidv4(), id, step.step_order, step.action, step.wait_days ?? 0, step.condition ?? 'always', step.message_text ?? null);
+    insertStep.run(uuidv4(), id, step.step_order, step.action, step.wait_days ?? 0, step.condition ?? 'always', step.message_text ?? null, step.email_subject ?? null);
   }
 
   logger.info('Campaign created', { id, name });

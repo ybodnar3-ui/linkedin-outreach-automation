@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wifi, WifiOff, LogIn, Sparkles, Key } from 'lucide-react';
+import { Wifi, WifiOff, LogIn, Sparkles, Key, Mail } from 'lucide-react';
 import { settingsApi } from '../lib/api';
 
 interface SettingsData {
@@ -12,6 +12,12 @@ interface SettingsData {
   anthropic_api_key: string | null;
   auto_email_discovery: string | null;
   icebreaker_enabled: string | null;
+  smtp_host: string | null;
+  smtp_port: string | null;
+  smtp_user: string | null;
+  smtp_from: string | null;
+  smtp_secure: string | null;
+  smtp_password: string | null;
 }
 
 export function SettingsPage() {
@@ -32,6 +38,12 @@ export function SettingsPage() {
     anthropic_api_key: '',
     auto_email_discovery: 'false',
     icebreaker_enabled: '0',
+    smtp_host: '',
+    smtp_port: '587',
+    smtp_user: '',
+    smtp_from: '',
+    smtp_secure: '0',
+    smtp_password: '',
   });
   const [loginMsg, setLoginMsg] = useState('');
 
@@ -48,6 +60,12 @@ export function SettingsPage() {
         anthropic_api_key: s.anthropic_api_key ?? '',
         auto_email_discovery: s.auto_email_discovery ?? 'false',
         icebreaker_enabled: s.icebreaker_enabled ?? '0',
+        smtp_host: s.smtp_host ?? '',
+        smtp_port: s.smtp_port ?? '587',
+        smtp_user: s.smtp_user ?? '',
+        smtp_from: s.smtp_from ?? '',
+        smtp_secure: s.smtp_secure ?? '0',
+        smtp_password: s.smtp_password ?? '',
       }));
     }
   }, [settings]);
@@ -235,6 +253,63 @@ export function SettingsPage() {
           className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
         >
           {saveMutation.isPending ? 'Saving…' : 'Save Keys'}
+        </button>
+      </div>
+
+      {/* SMTP Email Sending */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Mail size={16} className="text-blue-500" />
+          <h2 className="font-semibold text-gray-900">Email Sending (SMTP)</h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          Configure SMTP to enable the <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">send_email</code> campaign step.
+          Uses the lead's discovered email address.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">SMTP Host</label>
+            <input value={form.smtp_host} onChange={e => setForm(f => ({ ...f, smtp_host: e.target.value }))}
+              placeholder="smtp.gmail.com"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Port</label>
+            <input value={form.smtp_port} onChange={e => setForm(f => ({ ...f, smtp_port: e.target.value }))}
+              placeholder="587"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">SMTP Username / Email</label>
+          <input value={form.smtp_user} onChange={e => setForm(f => ({ ...f, smtp_user: e.target.value }))}
+            placeholder="you@gmail.com"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">SMTP Password / App Password</label>
+          <input type="password" value={form.smtp_password} onChange={e => setForm(f => ({ ...f, smtp_password: e.target.value }))}
+            placeholder={form.smtp_password === '***' ? '••••••• (saved)' : 'Enter password…'}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">From Name &amp; Email</label>
+          <input value={form.smtp_from} onChange={e => setForm(f => ({ ...f, smtp_from: e.target.value }))}
+            placeholder='John Smith <john@example.com>'
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" className="sr-only peer"
+              checked={form.smtp_secure === '1'}
+              onChange={e => setForm(f => ({ ...f, smtp_secure: e.target.checked ? '1' : '0' }))} />
+            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
+          </label>
+          <span className="text-sm text-gray-700">Use TLS (port 465)</span>
+        </div>
+        <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors">
+          {saveMutation.isPending ? 'Saving…' : 'Save SMTP Settings'}
         </button>
       </div>
 

@@ -5,9 +5,11 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
-const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working_hours_end', 'icebreaker_enabled'];
-const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery', 'openai_api_key', 'anthropic_api_key'];
-const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key'];
+const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working_hours_end', 'icebreaker_enabled',
+  'smtp_host', 'smtp_port', 'smtp_user', 'smtp_from', 'smtp_secure'];
+const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery', 'openai_api_key', 'anthropic_api_key',
+  'smtp_password'];
+const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key', 'smtp_password'];
 
 router.get('/', (_req: Request, res: Response) => {
   const settings: Record<string, string | null> = {};
@@ -20,6 +22,12 @@ router.get('/', (_req: Request, res: Response) => {
   }
   settings['auto_email_discovery'] = getSetting('auto_email_discovery') || 'false';
   settings['icebreaker_enabled'] = getSetting('icebreaker_enabled') || '0';
+  // SMTP non-secret fields
+  settings['smtp_host'] = getSetting('smtp_host') || '';
+  settings['smtp_port'] = getSetting('smtp_port') || '587';
+  settings['smtp_user'] = getSetting('smtp_user') || '';
+  settings['smtp_from'] = getSetting('smtp_from') || '';
+  settings['smtp_secure'] = getSetting('smtp_secure') || '0';
   return res.json(settings);
 });
 

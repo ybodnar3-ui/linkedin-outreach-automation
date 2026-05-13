@@ -9,6 +9,7 @@ import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
 import { generateIcebreaker } from '../services/icebreaker';
+import { sendEmail } from '../services/emailSender';
 
 const runningAccounts = new Set<string>();
 
@@ -28,6 +29,7 @@ interface CampaignStep {
   wait_days: number;
   condition: string;
   message_text: string | null;
+  email_subject: string | null;
   branch_type: string | null;
   branch_condition_days: number;
   next_step_true_id: string | null;
@@ -58,6 +60,7 @@ interface Lead {
   recent_post: string | null;
   mutual_connections: string | null;
   skills: string | null;
+  email: string | null;
 }
 
 async function renderTemplate(template: string, lead: Lead): Promise<string> {
@@ -173,6 +176,26 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
       const sent = await sendMessage(lead.linkedin_url, text, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
+      }
+      await actionDelay();
+      break;
+    }
+    case 'send_email': {
+      if (!lead.email) {
+        logger.warn('send_email step: lead has no email, skipping', { leadId: lead.id });
+        break;
+      }
+      if (!step.message_text) {
+        logger.warn('send_email step: no message_text (body) configured', { stepId: step.id });
+        break;
+      }
+      const subject = step.email_subject
+        ? await renderTemplate(step.email_subject, lead)
+        : `Hi ${lead.first_name || 'there'}`;
+      const body = await renderTemplate(step.message_text, lead);
+      const sent = await sendEmail({ to: lead.email, subject, body });
+      if (sent) {
+        broadcastLog('email_sent', { leadId: lead.id, to: lead.email });
       }
       await actionDelay();
       break;

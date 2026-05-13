@@ -13,7 +13,7 @@ import { Plus, GripVertical, Trash2, ArrowLeft } from 'lucide-react';
 import { campaignsApi } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
 
-type ActionType = 'visit' | 'connect' | 'message' | 'check_connection' | 'wait';
+type ActionType = 'visit' | 'connect' | 'message' | 'check_connection' | 'wait' | 'send_email';
 type Condition = 'always' | 'if_connected' | 'if_not_replied';
 
 interface Step {
@@ -23,6 +23,7 @@ interface Step {
   wait_days: number;
   condition: Condition;
   message_text: string;
+  email_subject: string;
 }
 
 const ACTION_LABELS: Record<ActionType, string> = {
@@ -31,6 +32,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   message: 'Send Message',
   check_connection: 'Check Connection',
   wait: 'Wait',
+  send_email: 'Send Email',
 };
 
 const ACTION_COLORS: Record<ActionType, string> = {
@@ -39,6 +41,7 @@ const ACTION_COLORS: Record<ActionType, string> = {
   message: 'bg-purple-50 border-purple-200',
   check_connection: 'bg-yellow-50 border-yellow-200',
   wait: 'bg-gray-50 border-gray-200',
+  send_email: 'bg-orange-50 border-orange-200',
 };
 
 const TEMPLATE_VARS = [
@@ -57,7 +60,7 @@ function SortableStep({ step, onChange, onDelete }: {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: step._id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
-  const hasText = step.action === 'connect' || step.action === 'message';
+  const hasText = step.action === 'connect' || step.action === 'message' || step.action === 'send_email';
   const maxLen = step.action === 'connect' ? 300 : 1900;
 
   return (
@@ -69,7 +72,7 @@ function SortableStep({ step, onChange, onDelete }: {
 
         <select
           value={step.action}
-          onChange={e => onChange({ ...step, action: e.target.value as ActionType, message_text: '' })}
+          onChange={e => onChange({ ...step, action: e.target.value as ActionType, message_text: '', email_subject: '' })}
           className="text-sm font-medium bg-white border border-gray-200 rounded-lg px-2 py-1"
         >
           {Object.entries(ACTION_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -103,6 +106,17 @@ function SortableStep({ step, onChange, onDelete }: {
         </div>
       )}
 
+      {step.action === 'send_email' && (
+        <div className="space-y-2">
+          <input
+            value={step.email_subject}
+            onChange={e => onChange({ ...step, email_subject: e.target.value })}
+            placeholder="Email subject (supports {firstName} etc.)"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-orange-400"
+          />
+        </div>
+      )}
+
       {hasText && (
         <div className="space-y-1.5">
           <div className="flex flex-wrap gap-1">
@@ -117,8 +131,12 @@ function SortableStep({ step, onChange, onDelete }: {
             value={step.message_text}
             onChange={e => onChange({ ...step, message_text: e.target.value })}
             maxLength={maxLen}
-            rows={3}
-            placeholder={step.action === 'connect' ? 'Connection note (optional)…' : 'Message text…'}
+            rows={step.action === 'send_email' ? 6 : 3}
+            placeholder={
+              step.action === 'connect' ? 'Connection note (optional)…' :
+              step.action === 'send_email' ? 'Email body (plain text, supports {firstName} etc.)…' :
+              'Message text…'
+            }
             className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
           <p className="text-xs text-gray-400 text-right">{step.message_text.length}/{maxLen}</p>
@@ -148,7 +166,12 @@ export function CampaignBuilderPage() {
     if (existing) {
       setName(existing.name);
       setTimezone(existing.timezone);
-      setSteps((existing.steps ?? []).map((s: Omit<Step, '_id'>) => ({ ...s, _id: uuidv4() })));
+      setSteps((existing.steps ?? []).map((s: Omit<Step, '_id'>) => ({
+        ...s,
+        _id: uuidv4(),
+        message_text: s.message_text ?? '',
+        email_subject: (s as Step & { email_subject?: string }).email_subject ?? '',
+      })));
     }
   }, [existing]);
 
@@ -170,7 +193,7 @@ export function CampaignBuilderPage() {
 
   function addStep() {
     setSteps(prev => [...prev, {
-      _id: uuidv4(), step_order: prev.length + 1, action: 'visit', wait_days: 1, condition: 'always', message_text: '',
+      _id: uuidv4(), step_order: prev.length + 1, action: 'visit', wait_days: 1, condition: 'always', message_text: '', email_subject: '',
     }]);
   }
 
@@ -195,6 +218,7 @@ export function CampaignBuilderPage() {
       steps: steps.map((s, i) => ({
         step_order: i + 1, action: s.action, wait_days: s.wait_days,
         condition: s.condition, message_text: s.message_text || null,
+        email_subject: s.email_subject || null,
       })),
     };
   }

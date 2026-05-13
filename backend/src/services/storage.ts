@@ -135,6 +135,7 @@ export function initDb(): void {
   addColumnIfNotExists('campaign_steps', 'next_step_true_id', 'TEXT REFERENCES campaign_steps(id) ON DELETE SET NULL');
   addColumnIfNotExists('campaign_steps', 'next_step_false_id', 'TEXT REFERENCES campaign_steps(id) ON DELETE SET NULL');
   addColumnIfNotExists('campaign_steps', 'ab_test_id', 'TEXT REFERENCES ab_tests(id) ON DELETE SET NULL');
+  addColumnIfNotExists('campaign_steps', 'email_subject', 'TEXT');
 
   // leads migrations
   addColumnIfNotExists('leads', 'email', 'TEXT');
