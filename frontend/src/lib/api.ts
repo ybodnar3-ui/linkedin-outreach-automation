@@ -34,6 +34,8 @@ export const leadsApi = {
     form.append('campaign_id', campaignId);
     return api.post('/leads/import/csv', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
   },
+  importSalesNav: (campaignId: string, searchUrl: string, maxLeads?: number) =>
+    api.post('/leads/import-sales-nav', { campaign_id: campaignId, search_url: searchUrl, max_leads: maxLeads }).then(r => r.data),
 };
 
 // Analytics

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward, Mail, Sparkles } from 'lucide-react';
+import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search } from 'lucide-react';
 import { leadsApi, campaignsApi } from '../lib/api';
 
 interface Lead {
@@ -42,6 +42,11 @@ export function LeadsPage() {
   const [page, setPage] = useState(1);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showSalesNavModal, setShowSalesNavModal] = useState(false);
+  const [salesNavUrl, setSalesNavUrl] = useState('');
+  const [salesNavCampaign, setSalesNavCampaign] = useState('');
+  const [salesNavMax, setSalesNavMax] = useState(25);
+  const [salesNavResult, setSalesNavResult] = useState<{ added: number; skipped: number; total_found: number } | null>(null);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvCampaign, setCsvCampaign] = useState('');
   const [csvResult, setCsvResult] = useState<{ added: number; skipped: number; errors: number } | null>(null);
@@ -69,6 +74,11 @@ export function LeadsPage() {
     onSuccess: (res) => { setCsvResult(res); qc.invalidateQueries({ queryKey: ['leads'] }); },
   });
 
+  const salesNavMutation = useMutation({
+    mutationFn: () => leadsApi.importSalesNav(salesNavCampaign, salesNavUrl, salesNavMax),
+    onSuccess: (res) => { setSalesNavResult(res); qc.invalidateQueries({ queryKey: ['leads'] }); },
+  });
+
   // Add lead form state
   const [addForm, setAddForm] = useState({ campaign_id: '', linkedin_url: '', first_name: '', last_name: '', company: '', title: '' });
   const addMutation = useMutation({
@@ -85,6 +95,9 @@ export function LeadsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Leads <span className="text-gray-400 text-base font-normal">({total})</span></h1>
         <div className="flex gap-2">
+          <button onClick={() => setShowSalesNavModal(true)} className="flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors">
+            <Search size={15} /> Sales Navigator
+          </button>
           <button onClick={() => setShowCsvModal(true)} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors">
             <Upload size={15} /> Import CSV
           </button>
@@ -185,6 +198,66 @@ export function LeadsPage() {
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-3 py-1 border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50">Next</button>
         </div>
       </div>
+
+      {/* Sales Navigator Import Modal */}
+      {showSalesNavModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Search size={16} className="text-blue-600" /> Import from Sales Navigator
+              </h2>
+              <button onClick={() => { setShowSalesNavModal(false); setSalesNavResult(null); setSalesNavUrl(''); }}><X size={18} /></button>
+            </div>
+
+            {salesNavResult ? (
+              <div className="space-y-3">
+                <p className="text-green-600 font-medium">Import complete!</p>
+                <p className="text-sm text-gray-600">
+                  Found: <strong>{salesNavResult.total_found}</strong> total ·
+                  Added: <strong>{salesNavResult.added}</strong> ·
+                  Skipped: <strong>{salesNavResult.skipped}</strong>
+                </p>
+                <button onClick={() => { setShowSalesNavModal(false); setSalesNavResult(null); setSalesNavUrl(''); }}
+                  className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Done</button>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500">
+                  Paste a LinkedIn Sales Navigator search URL. Your active LinkedIn session must have a Sales Navigator subscription.
+                </p>
+                <select value={salesNavCampaign} onChange={e => setSalesNavCampaign(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="">Select campaign…</option>
+                  {(campaigns as Campaign[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <input
+                  value={salesNavUrl}
+                  onChange={e => setSalesNavUrl(e.target.value)}
+                  placeholder="https://www.linkedin.com/sales/search/people?..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-gray-700 shrink-0">Max leads:</label>
+                  <input type="number" min={1} max={100} value={salesNavMax}
+                    onChange={e => setSalesNavMax(Number(e.target.value))}
+                    className="w-24 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                </div>
+                {salesNavMutation.isError && (
+                  <p className="text-red-500 text-xs">{String((salesNavMutation.error as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Import failed')}</p>
+                )}
+                <button
+                  onClick={() => salesNavMutation.mutate()}
+                  disabled={!salesNavCampaign || !salesNavUrl || salesNavMutation.isPending}
+                  className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40"
+                >
+                  {salesNavMutation.isPending ? 'Scraping… (may take 30s)' : 'Import Leads'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* CSV Import Modal */}
       {showCsvModal && (
