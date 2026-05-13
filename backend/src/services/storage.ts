@@ -152,6 +152,8 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'mutual_connections', 'TEXT');
   addColumnIfNotExists('leads', 'skills', 'TEXT');
   addColumnIfNotExists('leads', 'enriched_at', 'INTEGER');
+  // reply detection
+  addColumnIfNotExists('leads', 'replied_at', 'INTEGER');
 
   // accounts health migrations
   addColumnIfNotExists('accounts', 'health_score', 'INTEGER NOT NULL DEFAULT 100');

@@ -72,6 +72,22 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
   await page.goto(THREAD_URL(threadId), { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForSelector('.msg-s-message-list', { timeout: 10000 }).catch(() => {});
 
+  // Try to extract participant's LinkedIn profile URL from thread header
+  // Used to match this thread to a lead for reply detection
+  let participantProfileUrl: string | null = null;
+  try {
+    const href = await page.$eval(
+      '.msg-thread__link-to-profile, .msg-s-profile-card a[href*="/in/"], .presence-entity a[href*="/in/"]',
+      (el) => (el as HTMLAnchorElement).href,
+    ).catch(() => null);
+
+    if (href) {
+      const url = new URL(href);
+      // Normalise: keep only /in/<slug> portion, no query params
+      participantProfileUrl = `https://www.linkedin.com${url.pathname}`.replace(/\/$/, '');
+    }
+  } catch { /* non-fatal */ }
+
   const messages = await page.$$eval(
     '.msg-s-event-listitem',
     (items) => (items as Element[]).map(item => {
@@ -91,7 +107,19 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
     }).filter(m => m.text.length > 0)
   ) as Array<{ direction: 'in' | 'out'; text: string; senderName: string | null; timestamp: number }>;
 
+  // Match thread to a lead via profile URL (only leads not yet replied)
+  let matchedLeadId: string | null = null;
+  if (participantProfileUrl) {
+    const slug = participantProfileUrl.replace('https://www.linkedin.com', '');
+    const matched = db.prepare(
+      "SELECT id FROM leads WHERE linkedin_url LIKE ? AND replied_at IS NULL LIMIT 1"
+    ).get(`%${slug}%`) as { id: string } | undefined;
+    if (matched) matchedLeadId = matched.id;
+  }
+
+  const hasInbound = messages.some(m => m.direction === 'in');
   let savedCount = 0;
+
   for (const msg of messages) {
     const existing = db.prepare(
       'SELECT id FROM inbox_messages WHERE thread_id = ? AND direction = ? AND timestamp = ?'
@@ -100,10 +128,19 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
     if (!existing) {
       db.prepare(`
         INSERT INTO inbox_messages (id, account_id, thread_id, lead_id, direction, sender_name, text, timestamp)
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
-      `).run(uuidv4(), accountId, threadId, msg.direction, msg.senderName, msg.text, msg.timestamp);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(uuidv4(), accountId, threadId, matchedLeadId, msg.direction, msg.senderName, msg.text, msg.timestamp);
       savedCount++;
     }
+  }
+
+  // Mark lead as replied when inbound message found
+  if (matchedLeadId && hasInbound) {
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare(
+      "UPDATE leads SET replied_at = ?, status = 'replied', updated_at = ? WHERE id = ? AND replied_at IS NULL"
+    ).run(now, now, matchedLeadId);
+    logger.info('Lead marked as replied', { leadId: matchedLeadId, threadId, accountId });
   }
 
   return savedCount;

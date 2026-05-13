@@ -61,6 +61,7 @@ interface Lead {
   mutual_connections: string | null;
   skills: string | null;
   email: string | null;
+  replied_at: number | null;
 }
 
 async function renderTemplate(template: string, lead: Lead): Promise<string> {
@@ -309,6 +310,7 @@ async function runCampaignsForAccount(accountId: string): Promise<void> {
         SELECT * FROM leads
         WHERE campaign_id = ?
           AND status IN ('pending', 'in_progress')
+          AND replied_at IS NULL
           AND (next_action_at IS NULL OR next_action_at <= ?)
         ORDER BY created_at ASC
         LIMIT 10

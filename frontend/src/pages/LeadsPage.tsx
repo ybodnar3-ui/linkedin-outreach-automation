@@ -24,6 +24,7 @@ interface Lead {
   recent_post: string | null;
   mutual_connections: string | null;
   enriched_at: number | null;
+  replied_at: number | null;
 }
 
 interface Campaign { id: string; name: string }
@@ -33,6 +34,15 @@ const STATUS_COLOR: Record<string, string> = {
   in_progress: 'text-blue-600',
   completed: 'text-green-600',
   skipped: 'text-yellow-600',
+  replied: 'text-purple-600',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  skipped: 'Skipped',
+  replied: 'Replied ✉',
 };
 
 export function LeadsPage() {
@@ -174,7 +184,9 @@ export function LeadsPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`font-medium ${STATUS_COLOR[l.status] ?? 'text-gray-500'}`}>{l.status}</span>
+                  <span className={`font-medium ${STATUS_COLOR[l.status] ?? 'text-gray-500'}`}>
+                    {STATUS_LABEL[l.status] ?? l.status}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">{new Date(l.updated_at * 1000).toLocaleDateString()}</td>
                 <td className="px-4 py-3">
