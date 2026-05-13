@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    restart: unless-stopped
+
+  # Dev-only: frontend hot reload served separately
+  frontend-dev:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --ignore-scripts && npm run dev"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - ./node_modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    profiles:
+      - dev
