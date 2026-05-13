@@ -2,7 +2,8 @@ import cron from 'node-cron';
 import { db, getSetting } from '../services/storage';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
-import { isWithinWorkingHours, canPerformAction } from '../utils/delays';
+import { isWithinWorkingHours } from '../utils/delays';
+import { canAccountPerformAction, runNightlyHealthBonus } from '../services/accountHealth';
 import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
@@ -80,7 +81,7 @@ async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
   }
 }
 
-async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
+async function executeStep(lead: Lead, step: CampaignStep, accountId: string): Promise<void> {
   const conditionMet = await checkCondition(step.condition, lead);
   if (!conditionMet) {
     logger.info('Condition not met, skipping step', { leadId: lead.id, step: step.step_order, condition: step.condition });
@@ -93,18 +94,18 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
 
   switch (step.action) {
     case 'visit': {
-      if (!canPerformAction('visit')) {
-        logger.info('Daily visit limit reached');
+      if (!canAccountPerformAction(accountId, 'visit')) {
+        logger.info('Daily visit limit reached', { accountId });
         return;
       }
-      await visitProfile(lead.linkedin_url);
+      await visitProfile(lead.linkedin_url, accountId);
       await actionDelay();
       break;
     }
     case 'connect': {
-      if (!canPerformAction('connection')) {
-        logger.info('Daily connection limit reached');
-        broadcastLog('limit_reached', { action: 'connection' });
+      if (!canAccountPerformAction(accountId, 'connection')) {
+        logger.info('Daily connection limit reached', { accountId });
+        broadcastLog('limit_reached', { action: 'connection', accountId });
         return;
       }
       let rawNote = step.message_text;
@@ -112,7 +113,7 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
       }
       const note = rawNote ? renderTemplate(rawNote, lead) : undefined;
-      const sent = await sendConnectionRequest(lead.linkedin_url, note);
+      const sent = await sendConnectionRequest(lead.linkedin_url, note, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
       }
@@ -128,13 +129,13 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
         logger.warn('Message step has no message_text', { stepId: step.id });
         break;
       }
-      if (!canPerformAction('message')) {
-        logger.info('Daily message limit reached');
-        broadcastLog('limit_reached', { action: 'message' });
+      if (!canAccountPerformAction(accountId, 'message')) {
+        logger.info('Daily message limit reached', { accountId });
+        broadcastLog('limit_reached', { action: 'message', accountId });
         return;
       }
       const text = renderTemplate(rawText, lead);
-      const sent = await sendMessage(lead.linkedin_url, text);
+      const sent = await sendMessage(lead.linkedin_url, text, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
       }
@@ -194,7 +195,7 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
     .run(step.step_order + 1, nextActionAt, now, lead.id);
 }
 
-async function processLead(lead: Lead, steps: CampaignStep[]): Promise<void> {
+async function processLead(lead: Lead, steps: CampaignStep[], accountId: string): Promise<void> {
   const step = steps.find(s => s.step_order === lead.current_step);
 
   if (!step) {
@@ -208,7 +209,7 @@ async function processLead(lead: Lead, steps: CampaignStep[]): Promise<void> {
   db.prepare("UPDATE leads SET status = 'in_progress', updated_at = ? WHERE id = ?")
     .run(Math.floor(Date.now() / 1000), lead.id);
 
-  await executeStep(lead, step);
+  await executeStep(lead, step, accountId);
 }
 
 async function runWorkerCycle(): Promise<void> {
@@ -245,7 +246,7 @@ async function runWorkerCycle(): Promise<void> {
       for (const lead of leads) {
         try {
           broadcastLog('lead_processing', { leadId: lead.id, url: lead.linkedin_url, campaign: campaign.name });
-          await processLead(lead, steps);
+          await processLead(lead, steps, key);
           await leadDelay();
         } catch (err) {
           logger.error('Error processing lead', {
@@ -271,23 +272,21 @@ export function pauseAllCampaigns(): void {
 }
 
 export function startWorker(): void {
+  // Main 5-minute campaign worker
   cron.schedule('*/5 * * * *', () => {
     runWorkerCycle().catch((err) => {
       logger.error('Unhandled worker error', { error: err instanceof Error ? err.message : String(err) });
     });
-
-    // Per-account cycles
-    import('../services/accounts').then(({ listAccounts }) => {
-      const accounts = listAccounts().filter((a: { status: string }) => a.status === 'active');
-      for (const account of accounts) {
-        if (runningAccounts.has(account.id)) continue;
-        runningAccounts.add(account.id);
-        logger.info('Account worker cycle', { accountId: account.id });
-        // Full per-account processing happens here in future iteration
-        runningAccounts.delete(account.id);
-      }
-    }).catch(() => {});
   });
 
-  logger.info('Campaign worker scheduled (every 5 minutes)');
+  // Nightly health bonus at 00:05 — +5 to all active accounts that had no penalties
+  cron.schedule('5 0 * * *', () => {
+    try {
+      runNightlyHealthBonus();
+    } catch (err) {
+      logger.error('Nightly health bonus error', { error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  logger.info('Campaign worker scheduled (every 5 minutes) + nightly health bonus (00:05)');
 }

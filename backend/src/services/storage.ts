@@ -141,6 +141,21 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'email_source', "TEXT CHECK(email_source IN ('hunter','apollo','manual'))");
   addColumnIfNotExists('leads', 'email_found_at', 'INTEGER');
   addColumnIfNotExists('leads', 'email_status', "TEXT NOT NULL DEFAULT 'pending'");
+
+  // accounts health migrations
+  addColumnIfNotExists('accounts', 'health_score', 'INTEGER NOT NULL DEFAULT 100');
+
+  // per-account daily tracker table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS account_daily_tracker (
+      account_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      connections_sent INTEGER NOT NULL DEFAULT 0,
+      messages_sent INTEGER NOT NULL DEFAULT 0,
+      profiles_visited INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (account_id, date)
+    );
+  `);
 }
 
 export function getTodayTracker(): { connections_sent: number; messages_sent: number; profiles_visited: number } {

@@ -1,6 +1,7 @@
 import { Page } from 'playwright';
 import { getBrowser, loadSession } from './browser';
 import { incrementTracker } from './storage';
+import { applyHealthPenalty, incrementAccountTracker } from './accountHealth';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 
@@ -51,7 +52,7 @@ export async function checkForWarnings(page: Page): Promise<WarningResult> {
   return { hasWarning: false };
 }
 
-export async function visitProfile(linkedinUrl: string): Promise<void> {
+export async function visitProfile(linkedinUrl: string, accountId = '__legacy__'): Promise<void> {
   const { gaussianDelay, humanScroll } = await import('../utils/humanizer');
   const page = await getPage();
 
@@ -66,6 +67,9 @@ export async function visitProfile(linkedinUrl: string): Promise<void> {
     if (warning.hasWarning) {
       logger.warn('Warning detected during profile visit', warning);
       broadcastLog('warning', warning);
+      if (warning.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warning.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
       return;
     }
 
@@ -73,13 +77,14 @@ export async function visitProfile(linkedinUrl: string): Promise<void> {
     await gaussianDelay(2000, 4000);
 
     incrementTracker('profiles_visited');
+    incrementAccountTracker(accountId, 'profiles_visited');
     logger.info('Profile visited', { url: linkedinUrl });
   } finally {
     await page.close();
   }
 }
 
-export async function sendConnectionRequest(linkedinUrl: string, note?: string): Promise<boolean> {
+export async function sendConnectionRequest(linkedinUrl: string, note?: string, accountId = '__legacy__'): Promise<boolean> {
   const { gaussianDelay, humanMouseMove, humanType } = await import('../utils/humanizer');
   const page = await getPage();
 
@@ -91,6 +96,9 @@ export async function sendConnectionRequest(linkedinUrl: string, note?: string):
     if (warning.hasWarning) {
       logger.warn('Warning detected before connection request', warning);
       broadcastLog('warning', warning);
+      if (warning.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warning.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
       return false;
     }
 
@@ -143,10 +151,14 @@ export async function sendConnectionRequest(linkedinUrl: string, note?: string):
     if (warningAfter.hasWarning) {
       logger.warn('Warning after connection request', warningAfter);
       broadcastLog('warning', warningAfter);
+      if (warningAfter.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warningAfter.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
       return false;
     }
 
     incrementTracker('connections_sent');
+    incrementAccountTracker(accountId, 'connections_sent');
     logger.info('Connection request sent', { url: linkedinUrl });
     broadcastLog('connection_sent', { url: linkedinUrl });
     return true;
@@ -155,7 +167,7 @@ export async function sendConnectionRequest(linkedinUrl: string, note?: string):
   }
 }
 
-export async function sendMessage(linkedinUrl: string, text: string): Promise<boolean> {
+export async function sendMessage(linkedinUrl: string, text: string, accountId = '__legacy__'): Promise<boolean> {
   const { gaussianDelay, humanMouseMove, humanType } = await import('../utils/humanizer');
   const page = await getPage();
 
@@ -201,10 +213,14 @@ export async function sendMessage(linkedinUrl: string, text: string): Promise<bo
     const warningAfter = await checkForWarnings(page);
     if (warningAfter.hasWarning) {
       broadcastLog('warning', warningAfter);
+      if (warningAfter.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else if (warningAfter.type === 'account_restriction') applyHealthPenalty(accountId, 'restriction');
+      else applyHealthPenalty(accountId, 'warning');
       return false;
     }
 
     incrementTracker('messages_sent');
+    incrementAccountTracker(accountId, 'messages_sent');
     logger.info('Message sent', { url: linkedinUrl });
     broadcastLog('message_sent', { url: linkedinUrl });
     return true;

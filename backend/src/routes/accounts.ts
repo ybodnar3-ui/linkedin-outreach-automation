@@ -1,11 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { createAccount, listAccounts, getAccount, deleteAccount, updateAccountStatus } from '../services/accounts';
 import { startManualLoginForAccount } from '../services/browser';
+import { getAccountHealthInfo } from '../services/accountHealth';
 
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
-  return res.json(listAccounts());
+  const accounts = listAccounts();
+  const enriched = accounts.map(acc => ({
+    ...acc,
+    health: getAccountHealthInfo(acc.id),
+  }));
+  return res.json(enriched);
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -26,6 +32,12 @@ router.delete('/:id', (req: Request, res: Response) => {
   if (!account) return res.status(404).json({ error: 'Not found' });
   deleteAccount(req.params.id);
   return res.json({ ok: true });
+});
+
+router.get('/:id/health', (req: Request, res: Response) => {
+  const account = getAccount(req.params.id);
+  if (!account) return res.status(404).json({ error: 'Not found' });
+  return res.json(getAccountHealthInfo(req.params.id));
 });
 
 router.post('/:id/login', async (req: Request, res: Response) => {
