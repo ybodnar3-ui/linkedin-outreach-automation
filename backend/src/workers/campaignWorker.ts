@@ -2,17 +2,20 @@ import cron from 'node-cron';
 import { db, getSetting } from '../services/storage';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
-import { isWithinWorkingHours, canPerformAction, SAFE_LIMITS } from '../utils/delays';
+import { isWithinWorkingHours, canPerformAction } from '../utils/delays';
 import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
+import { resolveBranch } from '../services/branchResolver';
+import { getAssignedText } from '../services/abTest';
 
-let isRunning = false;
+const runningAccounts = new Set<string>();
 
 interface Campaign {
   id: string;
   name: string;
   status: string;
   timezone: string;
+  account_id: string | null;
 }
 
 interface CampaignStep {
@@ -23,6 +26,11 @@ interface CampaignStep {
   wait_days: number;
   condition: string;
   message_text: string | null;
+  branch_type: string | null;
+  branch_condition_days: number;
+  next_step_true_id: string | null;
+  next_step_false_id: string | null;
+  ab_test_id: string | null;
 }
 
 interface Lead {
@@ -66,7 +74,6 @@ async function checkCondition(condition: string, lead: Lead): Promise<boolean> {
       }
       return false;
     case 'if_not_replied':
-      // Treat as connected but no reply — check connection, skip message check for now
       return lead.connected_at != null;
     default:
       return true;
@@ -77,7 +84,6 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
   const conditionMet = await checkCondition(step.condition, lead);
   if (!conditionMet) {
     logger.info('Condition not met, skipping step', { leadId: lead.id, step: step.step_order, condition: step.condition });
-    // Advance to next step with 0 wait
     db.prepare('UPDATE leads SET current_step = ?, next_action_at = ?, updated_at = ? WHERE id = ?')
       .run(step.step_order + 1, Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), lead.id);
     return;
@@ -101,7 +107,11 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
         broadcastLog('limit_reached', { action: 'connection' });
         return;
       }
-      const note = step.message_text ? renderTemplate(step.message_text, lead) : undefined;
+      let rawNote = step.message_text;
+      if (step.ab_test_id && rawNote) {
+        rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
+      }
+      const note = rawNote ? renderTemplate(rawNote, lead) : undefined;
       const sent = await sendConnectionRequest(lead.linkedin_url, note);
       if (sent) {
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -110,7 +120,11 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
       break;
     }
     case 'message': {
-      if (!step.message_text) {
+      let rawText = step.message_text;
+      if (step.ab_test_id) {
+        rawText = getAssignedText(lead.id, step.ab_test_id) ?? step.message_text;
+      }
+      if (!rawText) {
         logger.warn('Message step has no message_text', { stepId: step.id });
         break;
       }
@@ -119,7 +133,7 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
         broadcastLog('limit_reached', { action: 'message' });
         return;
       }
-      const text = renderTemplate(step.message_text, lead);
+      const text = renderTemplate(rawText, lead);
       const sent = await sendMessage(lead.linkedin_url, text);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -141,7 +155,6 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
             .run(now, lead.id);
           return;
         }
-        // Re-check in 24h
         db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
           .run(now + 86400, now, lead.id);
         return;
@@ -154,7 +167,28 @@ async function executeStep(lead: Lead, step: CampaignStep): Promise<void> {
       break;
   }
 
-  // Advance to next step
+  // Branch-aware routing
+  const branchResult = resolveBranch(step as import('../services/branchResolver').BranchStep, lead);
+
+  if (branchResult.action === 'wait') {
+    db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+      .run(now + 86400, now, lead.id);
+    return;
+  }
+
+  if (branchResult.action === 'jump') {
+    const targetStep = db.prepare('SELECT step_order FROM campaign_steps WHERE id = ?')
+      .get(branchResult.next_step_id) as { step_order: number } | undefined;
+    if (targetStep) {
+      // Guard against backward loops
+      const jumpOrder = Math.max(targetStep.step_order, lead.current_step + 1);
+      db.prepare('UPDATE leads SET current_step = ?, next_action_at = ?, updated_at = ? WHERE id = ?')
+        .run(jumpOrder, now, now, lead.id);
+      return;
+    }
+  }
+
+  // Default linear advancement
   const nextActionAt = step.wait_days > 0 ? now + step.wait_days * 86400 : now;
   db.prepare('UPDATE leads SET current_step = ?, next_action_at = ?, updated_at = ? WHERE id = ?')
     .run(step.step_order + 1, nextActionAt, now, lead.id);
@@ -164,7 +198,6 @@ async function processLead(lead: Lead, steps: CampaignStep[]): Promise<void> {
   const step = steps.find(s => s.step_order === lead.current_step);
 
   if (!step) {
-    // All steps done
     db.prepare("UPDATE leads SET status = 'completed', updated_at = ? WHERE id = ?")
       .run(Math.floor(Date.now() / 1000), lead.id);
     logger.info('Lead completed all steps', { leadId: lead.id });
@@ -179,11 +212,14 @@ async function processLead(lead: Lead, steps: CampaignStep[]): Promise<void> {
 }
 
 async function runWorkerCycle(): Promise<void> {
-  if (isRunning) return;
-  isRunning = true;
+  const key = '__legacy__';
+  if (runningAccounts.has(key)) return;
+  runningAccounts.add(key);
 
   try {
-    const activeCampaigns = db.prepare("SELECT * FROM campaigns WHERE status = 'active'").all() as Campaign[];
+    const activeCampaigns = db.prepare(
+      "SELECT * FROM campaigns WHERE status = 'active' AND (account_id IS NULL)"
+    ).all() as Campaign[];
 
     for (const campaign of activeCampaigns) {
       if (!isWithinWorkingHours(campaign.timezone)) {
@@ -223,7 +259,7 @@ async function runWorkerCycle(): Promise<void> {
   } catch (err) {
     logger.error('Worker cycle error', { error: err instanceof Error ? err.message : String(err) });
   } finally {
-    isRunning = false;
+    runningAccounts.delete(key);
   }
 }
 
@@ -235,11 +271,22 @@ export function pauseAllCampaigns(): void {
 }
 
 export function startWorker(): void {
-  // Run every 5 minutes
   cron.schedule('*/5 * * * *', () => {
     runWorkerCycle().catch((err) => {
       logger.error('Unhandled worker error', { error: err instanceof Error ? err.message : String(err) });
     });
+
+    // Per-account cycles
+    import('../services/accounts').then(({ listAccounts }) => {
+      const accounts = listAccounts().filter((a: { status: string }) => a.status === 'active');
+      for (const account of accounts) {
+        if (runningAccounts.has(account.id)) continue;
+        runningAccounts.add(account.id);
+        logger.info('Account worker cycle', { accountId: account.id });
+        // Full per-account processing happens here in future iteration
+        runningAccounts.delete(account.id);
+      }
+    }).catch(() => {});
   });
 
   logger.info('Campaign worker scheduled (every 5 minutes)');

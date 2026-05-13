@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Megaphone, Users, BarChart2, Settings } from 'lucide-react';
+import { LayoutDashboard, Megaphone, Users, BarChart2, Settings, UserCircle, Inbox } from 'lucide-react';
 
 const nav = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/campaigns', icon: Megaphone, label: 'Campaigns' },
   { to: '/leads', icon: Users, label: 'Leads' },
+  { to: '/inbox', icon: Inbox, label: 'Inbox' },
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { to: '/accounts', icon: UserCircle, label: 'Accounts' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

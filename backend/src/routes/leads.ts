@@ -5,6 +5,7 @@ import csv from 'csv-parser';
 import fs from 'fs';
 import { db } from '../services/storage';
 import { logger } from '../utils/logger';
+import { discoverEmail } from '../services/emailDiscovery';
 
 const router = Router();
 const upload = multer({ dest: '../data/uploads/' });
@@ -140,6 +141,20 @@ router.post('/import/csv', upload.single('file'), async (req: Request, res: Resp
 
   logger.info('CSV import complete', { campaign_id, added, skipped, errors: errors.length });
   return res.json({ added, skipped, errors: errors.length, errorDetails });
+});
+
+// POST /api/leads/:id/discover-email — trigger async email discovery
+router.post('/:id/discover-email', async (req: Request, res: Response) => {
+  const lead = db.prepare('SELECT id FROM leads WHERE id = ?').get(req.params.id) as { id: string } | undefined;
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  discoverEmail(req.params.id).catch(err => {
+    logger.error('Email discovery failed', {
+      leadId: req.params.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  return res.status(202).json({ ok: true, message: 'Email discovery started' });
 });
 
 export default router;

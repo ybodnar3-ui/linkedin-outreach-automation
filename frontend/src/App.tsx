@@ -10,6 +10,8 @@ import { CampaignBuilderPage } from './pages/CampaignBuilderPage';
 import { LeadsPage } from './pages/LeadsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AccountsPage } from './pages/AccountsPage';
+import { InboxPage } from './pages/InboxPage';
 
 function App() {
   useEffect(() => {
@@ -30,6 +32,8 @@ function App() {
             <Route path="/leads" element={<LeadsPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/inbox" element={<InboxPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

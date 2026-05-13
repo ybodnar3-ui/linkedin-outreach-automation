@@ -10,6 +10,9 @@ import campaignsRouter from './routes/campaigns';
 import leadsRouter from './routes/leads';
 import analyticsRouter from './routes/analytics';
 import settingsRouter from './routes/settings';
+import accountsRouter from './routes/accounts';
+import inboxRouter from './routes/inbox';
+import abTestsRouter from './routes/abTests';
 
 const PORT = process.env.PORT || 3001;
 
@@ -42,6 +45,9 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/leads', leadsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/accounts', accountsRouter);
+app.use('/api/inbox', inboxRouter);
+app.use('/api/ab-tests', abTestsRouter);
 
 // Pause all campaigns emergency endpoint
 app.post('/api/pause-all', (_req, res) => {
@@ -71,6 +77,14 @@ import('./workers/campaignWorker').then(({ startWorker }) => {
   logger.info('Campaign worker started');
 }).catch((err) => {
   logger.error('Failed to start campaign worker', { error: err instanceof Error ? err.message : String(err) });
+});
+
+// Start inbox poller
+import('./workers/inboxPoller').then(({ startInboxPoller }) => {
+  startInboxPoller();
+  logger.info('Inbox poller started');
+}).catch((err) => {
+  logger.error('Failed to start inbox poller', { error: err instanceof Error ? err.message : String(err) });
 });
 
 server.listen(PORT, () => {

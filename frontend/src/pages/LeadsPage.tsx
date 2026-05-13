@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward } from 'lucide-react';
+import { Upload, Plus, X, SkipForward, Mail } from 'lucide-react';
 import { leadsApi, campaignsApi } from '../lib/api';
 
 interface Lead {
@@ -13,6 +13,8 @@ interface Lead {
   status: string;
   campaign_id: string;
   updated_at: number;
+  email: string | null;
+  email_status: 'pending' | 'found' | 'not_found' | null;
 }
 
 interface Campaign { id: string; name: string }
@@ -45,6 +47,11 @@ export function LeadsPage() {
 
   const skipMutation = useMutation({
     mutationFn: (id: string) => leadsApi.skip(id, 'manual'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['leads'] }),
+  });
+
+  const discoverEmailMutation = useMutation({
+    mutationFn: (id: string) => leadsApi.discoverEmail(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['leads'] }),
   });
 
@@ -95,14 +102,14 @@ export function LeadsPage() {
         <table className="w-full text-sm">
           <thead className="border-b border-gray-100 bg-gray-50">
             <tr>
-              {['Name', 'Company', 'Title', 'Status', 'Last Action', ''].map(h => (
+              {['Name', 'Company', 'Title', 'Email', 'Status', 'Last Action', ''].map(h => (
                 <th key={h} className="text-left text-xs font-medium text-gray-500 px-4 py-3">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {isLoading && <tr><td colSpan={6} className="text-center py-8 text-gray-400">Loading…</td></tr>}
-            {!isLoading && leads.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No leads found</td></tr>}
+            {!isLoading && leads.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No leads found</td></tr>}
             {leads.map(l => (
               <tr key={l.id} className="hover:bg-gray-50/50 transition-colors">
                 <td className="px-4 py-3">
@@ -112,6 +119,23 @@ export function LeadsPage() {
                 </td>
                 <td className="px-4 py-3 text-gray-600">{l.company || '—'}</td>
                 <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate">{l.title || '—'}</td>
+                <td className="px-4 py-3">
+                  {l.email ? (
+                    <a href={`mailto:${l.email}`} className="text-blue-600 text-xs hover:underline">{l.email}</a>
+                  ) : l.email_status === 'pending' ? (
+                    <span className="text-gray-400 text-xs">Searching…</span>
+                  ) : l.email_status === 'not_found' ? (
+                    <span className="text-gray-400 text-xs">Not found</span>
+                  ) : (
+                    <button
+                      onClick={() => discoverEmailMutation.mutate(l.id)}
+                      disabled={discoverEmailMutation.isPending}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 border border-gray-200 rounded text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                    >
+                      <Mail size={10} /> Find
+                    </button>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <span className={`font-medium ${STATUS_COLOR[l.status] ?? 'text-gray-500'}`}>{l.status}</span>
                 </td>

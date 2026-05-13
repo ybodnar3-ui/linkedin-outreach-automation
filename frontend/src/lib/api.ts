@@ -27,6 +27,7 @@ export const leadsApi = {
   update: (id: string, data: unknown) => api.put(`/leads/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/leads/${id}`).then(r => r.data),
   skip: (id: string, reason?: string) => api.post(`/leads/${id}/skip`, { reason }).then(r => r.data),
+  discoverEmail: (id: string) => api.post(`/leads/${id}/discover-email`).then(r => r.data),
   importCsv: (campaignId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -49,4 +50,30 @@ export const settingsApi = {
   update: (data: Record<string, string>) => api.put('/settings', data).then(r => r.data),
   login: () => api.post('/settings/login').then(r => r.data),
   session: () => api.get('/settings/session').then(r => r.data),
+};
+
+// Accounts (multi-account)
+export const accountsApi = {
+  list: () => api.get('/accounts').then(r => r.data),
+  create: (data: { name: string; email?: string }) => api.post('/accounts', data).then(r => r.data),
+  delete: (id: string) => api.delete(`/accounts/${id}`).then(r => r.data),
+  login: (id: string) => api.post(`/accounts/${id}/login`).then(r => r.data),
+};
+
+// Inbox (Smart Inbox)
+export const inboxApi = {
+  threads: () => api.get('/inbox').then(r => r.data),
+  messages: (threadId: string) => api.get(`/inbox/${threadId}`).then(r => r.data),
+  reply: (threadId: string, text: string, accountId?: string) =>
+    api.post(`/inbox/${threadId}/reply`, { text, account_id: accountId }).then(r => r.data),
+};
+
+// A/B Tests
+export const abTestsApi = {
+  list: () => api.get('/ab-tests').then(r => r.data),
+  get: (id: string) => api.get(`/ab-tests/${id}`).then(r => r.data),
+  results: (id: string) => api.get(`/ab-tests/${id}/results`).then(r => r.data),
+  create: (data: { name: string; step_id?: string; variant_a_text: string; variant_b_text: string }) =>
+    api.post('/ab-tests', data).then(r => r.data),
+  delete: (id: string) => api.delete(`/ab-tests/${id}`).then(r => r.data),
 };

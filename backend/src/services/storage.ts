@@ -13,6 +13,13 @@ const db: DatabaseType = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function addColumnIfNotExists(table: string, column: string, definition: string): void {
+  const cols = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  if (!cols.find(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 export function initDb(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
@@ -68,10 +75,72 @@ export function initDb(): void {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT,
+      status TEXT NOT NULL DEFAULT 'disconnected',
+      session_file TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS inbox_messages (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL,
+      lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
+      direction TEXT NOT NULL CHECK(direction IN ('in','out')),
+      sender_name TEXT,
+      text TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS ab_tests (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      step_id TEXT REFERENCES campaign_steps(id) ON DELETE CASCADE,
+      sent_a INTEGER NOT NULL DEFAULT 0,
+      sent_b INTEGER NOT NULL DEFAULT 0,
+      replies_a INTEGER NOT NULL DEFAULT 0,
+      replies_b INTEGER NOT NULL DEFAULT 0,
+      winner TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS ab_test_variants (
+      id TEXT PRIMARY KEY,
+      ab_test_id TEXT NOT NULL REFERENCES ab_tests(id) ON DELETE CASCADE,
+      variant TEXT NOT NULL CHECK(variant IN ('a','b')),
+      text TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_leads_campaign_status ON leads(campaign_id, status);
     CREATE INDEX IF NOT EXISTS idx_leads_next_action ON leads(next_action_at);
     CREATE INDEX IF NOT EXISTS idx_campaign_steps_order ON campaign_steps(campaign_id, step_order);
+    CREATE INDEX IF NOT EXISTS idx_inbox_thread ON inbox_messages(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_account ON inbox_messages(account_id);
+    CREATE INDEX IF NOT EXISTS idx_ab_test_step ON ab_tests(step_id);
   `);
+
+  // Column migrations — idempotent, safe to run on existing data
+  // campaigns migrations
+  addColumnIfNotExists('campaigns', 'account_id', 'TEXT REFERENCES accounts(id) ON DELETE SET NULL');
+
+  // campaign_steps migrations
+  addColumnIfNotExists('campaign_steps', 'branch_type', "TEXT CHECK(branch_type IN ('if_connected','if_not_connected','if_replied','if_not_replied'))");
+  addColumnIfNotExists('campaign_steps', 'branch_condition_days', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfNotExists('campaign_steps', 'next_step_true_id', 'TEXT REFERENCES campaign_steps(id) ON DELETE SET NULL');
+  addColumnIfNotExists('campaign_steps', 'next_step_false_id', 'TEXT REFERENCES campaign_steps(id) ON DELETE SET NULL');
+  addColumnIfNotExists('campaign_steps', 'ab_test_id', 'TEXT REFERENCES ab_tests(id) ON DELETE SET NULL');
+
+  // leads migrations
+  addColumnIfNotExists('leads', 'email', 'TEXT');
+  addColumnIfNotExists('leads', 'email_source', "TEXT CHECK(email_source IN ('hunter','apollo','manual'))");
+  addColumnIfNotExists('leads', 'email_found_at', 'INTEGER');
+  addColumnIfNotExists('leads', 'email_status', "TEXT NOT NULL DEFAULT 'pending'");
 }
 
 export function getTodayTracker(): { connections_sent: number; messages_sent: number; profiles_visited: number } {

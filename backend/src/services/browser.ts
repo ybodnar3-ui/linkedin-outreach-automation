@@ -92,6 +92,83 @@ export async function isSessionActive(): Promise<boolean> {
   }
 }
 
+// ---- Multi-account browser factory ----
+const _accountBrowsers = new Map<string, { browser: Browser; context: BrowserContext }>();
+
+export async function getBrowserForAccount(accountId: string, sessionFile: string): Promise<BrowserContext> {
+  const existing = _accountBrowsers.get(accountId);
+  if (existing) return existing.context;
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: [...BROWSER_CONFIG.args],
+  });
+
+  const context = await browser.newContext({
+    userAgent: BROWSER_CONFIG.userAgent,
+    viewport: BROWSER_CONFIG.viewport,
+    locale: BROWSER_CONFIG.locale,
+    timezoneId: BROWSER_CONFIG.timezoneId,
+    extraHTTPHeaders: BROWSER_CONFIG.extraHTTPHeaders,
+  });
+
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  });
+
+  if (fs.existsSync(sessionFile)) {
+    try {
+      const cookies = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      await context.addCookies(cookies);
+    } catch { /* ignore corrupt session */ }
+  }
+
+  _accountBrowsers.set(accountId, { browser, context });
+  return context;
+}
+
+export async function closeAccountBrowser(accountId: string): Promise<void> {
+  const entry = _accountBrowsers.get(accountId);
+  if (!entry) return;
+  await entry.context.close().catch(() => {});
+  await entry.browser.close().catch(() => {});
+  _accountBrowsers.delete(accountId);
+}
+
+export function saveSessionForAccount(accountId: string, sessionFile: string, cookies: Parameters<BrowserContext['addCookies']>[0]): void {
+  fs.writeFileSync(sessionFile, JSON.stringify(cookies, null, 2));
+  logger.info('Session saved for account', { accountId });
+}
+
+export async function startManualLoginForAccount(accountId: string, sessionFile: string): Promise<void> {
+  logger.info('Starting manual login flow for account', { accountId });
+
+  const browser = await chromium.launch({ headless: false, args: [...BROWSER_CONFIG.args] });
+  const ctx = await browser.newContext({
+    userAgent: BROWSER_CONFIG.userAgent,
+    viewport: BROWSER_CONFIG.viewport,
+    locale: BROWSER_CONFIG.locale,
+    timezoneId: BROWSER_CONFIG.timezoneId,
+  });
+  const page = await ctx.newPage();
+  await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded' });
+
+  try {
+    await page.waitForURL('**/feed/**', { timeout: 120_000 });
+  } catch {
+    logger.warn('Login timeout for account', { accountId });
+    await browser.close();
+    return;
+  }
+
+  const cookies = await ctx.cookies();
+  saveSessionForAccount(accountId, sessionFile, cookies);
+  await browser.close();
+  logger.info('Manual login complete for account', { accountId });
+}
+
 export async function startManualLogin(): Promise<void> {
   logger.info('Starting manual login flow (headless:false)');
 

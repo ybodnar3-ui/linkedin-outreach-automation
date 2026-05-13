@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { analyticsApi } from '../lib/api';
+import { analyticsApi, abTestsApi } from '../lib/api';
 
 interface CampaignSummary {
   id: string;
@@ -15,11 +15,47 @@ interface CampaignSummary {
   acceptance_rate: number;
 }
 
+function ABTestCard({ testId, testName }: { testId: string; testName: string }) {
+  const { data } = useQuery({
+    queryKey: ['ab-test-results', testId],
+    queryFn: () => abTestsApi.results(testId),
+  });
+
+  if (!data) return null;
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-gray-900">{testName}</h3>
+        {data.winner && (
+          <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full font-medium">
+            Winner: Variant {data.winner.toUpperCase()}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        {(['a', 'b'] as const).map(v => (
+          <div key={v} className={`p-3 rounded-lg border ${data.winner === v ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
+            <p className="text-xs font-medium text-gray-600 mb-1">Variant {v.toUpperCase()}</p>
+            <p className="text-xs text-gray-500 mb-2 line-clamp-2">{data[`variant_${v}_text`]}</p>
+            <p className="text-lg font-semibold text-gray-900">{data[`reply_rate_${v}`]}%</p>
+            <p className="text-xs text-gray-500">{data.test[`sent_${v}`]} sent</p>
+          </div>
+        ))}
+      </div>
+      {!data.winner_determined && (
+        <p className="text-xs text-gray-400 mt-2">Winner declared after 20+ sends per variant with ≥5% reply rate difference</p>
+      )}
+    </div>
+  );
+}
+
 export function AnalyticsPage() {
   const [days, setDays] = useState(30);
   const { data: overview } = useQuery({ queryKey: ['analytics', 'overview'], queryFn: analyticsApi.overview });
   const { data: daily = [] } = useQuery({ queryKey: ['analytics', 'daily', days], queryFn: () => analyticsApi.daily(days) });
   const { data: campaignsSummary = [] } = useQuery({ queryKey: ['analytics', 'campaigns-summary'], queryFn: analyticsApi.campaignsSummary });
+  const { data: abTests = [] } = useQuery({ queryKey: ['ab-tests'], queryFn: abTestsApi.list });
 
   const chartData = [...(daily as Record<string, unknown>[])].reverse().map(d => ({
     date: String(d.date).slice(5),
@@ -126,6 +162,18 @@ export function AnalyticsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* A/B Tests section */}
+      {(abTests as Array<{ id: string; name: string }>).length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">A/B Tests</h2>
+          <div className="space-y-4">
+            {(abTests as Array<{ id: string; name: string }>).map(test => (
+              <ABTestCard key={test.id} testId={test.id} testName={test.name} />
+            ))}
+          </div>
         </div>
       )}
     </div>
