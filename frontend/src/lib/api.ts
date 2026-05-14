@@ -54,6 +54,8 @@ export const leadsApi = {
   },
   importSalesNav: (campaignId: string, searchUrl: string, maxLeads?: number) =>
     api.post('/leads/import-sales-nav', { campaign_id: campaignId, search_url: searchUrl, max_leads: maxLeads }).then(r => r.data),
+  importLinkedInSearch: (campaignId: string, accountId: string, searchUrl: string, maxLeads?: number) =>
+    api.post('/leads/import-linkedin-search', { campaign_id: campaignId, account_id: accountId, search_url: searchUrl, max_leads: maxLeads }).then(r => r.data),
 };
 
 // Analytics

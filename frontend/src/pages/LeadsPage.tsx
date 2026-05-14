@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search, Download, Link2 } from 'lucide-react';
-import { leadsApi, campaignsApi, crmApi } from '../lib/api';
+import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search, Download, Link2, Users } from 'lucide-react';
+import { leadsApi, campaignsApi, crmApi, accountsApi } from '../lib/api';
 
 interface Lead {
   id: string;
@@ -55,6 +55,12 @@ export function LeadsPage() {
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSalesNavModal, setShowSalesNavModal] = useState(false);
+  const [showLinkedInSearchModal, setShowLinkedInSearchModal] = useState(false);
+  const [liSearchUrl, setLiSearchUrl] = useState('');
+  const [liSearchCampaign, setLiSearchCampaign] = useState('');
+  const [liSearchAccount, setLiSearchAccount] = useState('');
+  const [liSearchMax, setLiSearchMax] = useState(50);
+  const [liSearchResult, setLiSearchResult] = useState<{ added: number; skipped: number; total_found: number; pages_scraped: number } | null>(null);
   const [salesNavUrl, setSalesNavUrl] = useState('');
   const [salesNavCampaign, setSalesNavCampaign] = useState('');
   const [salesNavMax, setSalesNavMax] = useState(25);
@@ -70,6 +76,7 @@ export function LeadsPage() {
   });
 
   const { data: campaigns = [] } = useQuery({ queryKey: ['campaigns'], queryFn: campaignsApi.list });
+  const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsApi.list });
 
   const skipMutation = useMutation({
     mutationFn: (id: string) => leadsApi.skip(id, 'manual'),
@@ -89,6 +96,11 @@ export function LeadsPage() {
   const salesNavMutation = useMutation({
     mutationFn: () => leadsApi.importSalesNav(salesNavCampaign, salesNavUrl, salesNavMax),
     onSuccess: (res) => { setSalesNavResult(res); qc.invalidateQueries({ queryKey: ['leads'] }); },
+  });
+
+  const liSearchMutation = useMutation({
+    mutationFn: () => leadsApi.importLinkedInSearch(liSearchCampaign, liSearchAccount, liSearchUrl, liSearchMax),
+    onSuccess: (res) => { setLiSearchResult(res); qc.invalidateQueries({ queryKey: ['leads'] }); },
   });
 
   // Add lead form state
@@ -112,6 +124,9 @@ export function LeadsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Leads <span className="text-gray-400 text-base font-normal">({total})</span></h1>
         <div className="flex flex-wrap gap-2">
+          <button onClick={() => setShowLinkedInSearchModal(true)} className="flex items-center gap-2 px-3 py-2 border border-blue-600 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            <Users size={15} /> <span>LinkedIn Search</span>
+          </button>
           <button onClick={() => setShowSalesNavModal(true)} className="flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors">
             <Search size={15} /> <span className="hidden sm:inline">Sales Navigator</span><span className="sm:hidden">SalesNav</span>
           </button>
@@ -241,6 +256,112 @@ export function LeadsPage() {
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-3 py-1 border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50">Next</button>
         </div>
       </div>
+
+      {/* LinkedIn Search Import Modal */}
+      {showLinkedInSearchModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Users size={16} className="text-blue-600" /> Import from LinkedIn Search
+              </h2>
+              <button onClick={() => { setShowLinkedInSearchModal(false); setLiSearchResult(null); setLiSearchUrl(''); }}><X size={18} /></button>
+            </div>
+
+            {liSearchResult ? (
+              <div className="space-y-3">
+                <p className="text-green-600 font-semibold">Import complete!</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Added', value: liSearchResult.added },
+                    { label: 'Skipped (duplicates)', value: liSearchResult.skipped },
+                    { label: 'Total found on LinkedIn', value: liSearchResult.total_found },
+                    { label: 'Pages scraped', value: liSearchResult.pages_scraped },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                      <p className="text-xs text-gray-500">{label}</p>
+                      <p className="text-lg font-bold text-gray-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setShowLinkedInSearchModal(false); setLiSearchResult(null); setLiSearchUrl(''); }}
+                  className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800 space-y-2">
+                  <p className="font-semibold">Як отримати URL пошуку:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-blue-700">
+                    <li>Зайди на <strong>linkedin.com/search/results/people/</strong></li>
+                    <li>Встав фільтри: посада, країна, галузь, компанія</li>
+                    <li>Скопіюй URL з адресного рядка і встав нижче</li>
+                  </ol>
+                </div>
+
+                <div className="space-y-3">
+                  <select
+                    value={liSearchCampaign}
+                    onChange={e => setLiSearchCampaign(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Оберіть кампанію…</option>
+                    {(campaigns as Campaign[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+
+                  <select
+                    value={liSearchAccount}
+                    onChange={e => setLiSearchAccount(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Оберіть акаунт LinkedIn…</option>
+                    {(accounts as Array<{ id: string; name: string; status: string }>)
+                      .filter(a => a.status === 'active')
+                      .map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+
+                  <input
+                    value={liSearchUrl}
+                    onChange={e => setLiSearchUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/search/results/people/?keywords=..."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm text-gray-700 shrink-0">Максимум лідів:</label>
+                    <input
+                      type="number" min={5} max={200} value={liSearchMax}
+                      onChange={e => setLiSearchMax(Number(e.target.value))}
+                      className="w-24 border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                    />
+                    <span className="text-xs text-gray-400">(10 лідів = ~1 сторінка)</span>
+                  </div>
+                </div>
+
+                {liSearchMutation.isError && (
+                  <p className="text-red-500 text-sm">
+                    {String((liSearchMutation.error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Помилка імпорту')}
+                  </p>
+                )}
+
+                <button
+                  onClick={() => liSearchMutation.mutate()}
+                  disabled={!liSearchCampaign || !liSearchAccount || !liSearchUrl || liSearchMutation.isPending}
+                  className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                >
+                  {liSearchMutation.isPending ? 'Скрапінг… (може зайняти 1-2 хв)' : 'Імпортувати лідів'}
+                </button>
+                <p className="text-xs text-gray-400 text-center">
+                  Бот відкриє LinkedIn через акаунт Alyona Scaleo і збере профілі з результатів пошуку
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Sales Navigator Import Modal */}
       {showSalesNavModal && (
