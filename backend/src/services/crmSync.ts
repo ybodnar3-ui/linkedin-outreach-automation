@@ -225,7 +225,7 @@ export async function syncLeadToCrm(leadId: string): Promise<void> {
       const contactId = await hubspotUpsert(lead, hubspotKey);
       const currentId = (db.prepare('SELECT crm_contact_id FROM leads WHERE id = ?').get(leadId) as LeadRow | undefined)?.crm_contact_id;
       const hubPart = `hubspot:${contactId}`;
-      const pipePart = extractCrmId(currentId, 'pipedrive');
+      const pipePart = extractCrmId(currentId ?? null, 'pipedrive');
       const newId = pipePart ? `${hubPart}|pipedrive:${pipePart}` : hubPart;
       db.prepare('UPDATE leads SET crm_contact_id = ?, crm_synced_at = ?, updated_at = ? WHERE id = ?')
         .run(newId, now, now, leadId);
@@ -244,7 +244,7 @@ export async function syncLeadToCrm(leadId: string): Promise<void> {
 
       const personId = await pipedriveUpsert(leadForPipedrive, pipedriveToken, pipedriveDomain);
       const currentId = (db.prepare('SELECT crm_contact_id FROM leads WHERE id = ?').get(leadId) as LeadRow | undefined)?.crm_contact_id;
-      const hubPart = extractCrmId(currentId, 'hubspot');
+      const hubPart = extractCrmId(currentId ?? null, 'hubspot');
       const newId = hubPart ? `hubspot:${hubPart}|pipedrive:${personId}` : `pipedrive:${personId}`;
       db.prepare('UPDATE leads SET crm_contact_id = ?, crm_synced_at = ?, updated_at = ? WHERE id = ?')
         .run(newId, now, now, leadId);
