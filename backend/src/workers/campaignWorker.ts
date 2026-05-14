@@ -10,6 +10,7 @@ import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
 import { generateIcebreaker } from '../services/icebreaker';
 import { sendEmail } from '../services/emailSender';
+import { syncLeadToCrm } from '../services/crmSync';
 
 const runningAccounts = new Set<string>();
 
@@ -265,6 +266,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
         logger.info('Connection accepted', { leadId: lead.id });
         broadcastLog('connection_accepted', { leadId: lead.id, url: lead.linkedin_url });
+        // CRM sync — fire and forget, non-blocking
+        syncLeadToCrm(lead.id).catch(err =>
+          logger.error('CRM sync error on connection', { leadId: lead.id, error: String(err) }),
+        );
       } else if (connStatus === 'pending') {
         const sentAt = lead.connection_sent_at || now;
         const daysPending = (now - sentAt) / 86400;

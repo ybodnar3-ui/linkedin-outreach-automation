@@ -3,6 +3,7 @@ import { db } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { classifyReply } from './replyClassifier';
+import { syncLeadToCrm } from './crmSync';
 
 export interface InboxThread {
   thread_id: string;
@@ -149,10 +150,16 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
   // Mark lead as replied when inbound message found
   if (matchedLeadId && hasInbound) {
     const now = Math.floor(Date.now() / 1000);
-    db.prepare(
+    const changed = db.prepare(
       "UPDATE leads SET replied_at = ?, status = 'replied', updated_at = ? WHERE id = ? AND replied_at IS NULL"
     ).run(now, now, matchedLeadId);
-    logger.info('Lead marked as replied', { leadId: matchedLeadId, threadId, accountId });
+    if (changed.changes > 0) {
+      logger.info('Lead marked as replied', { leadId: matchedLeadId, threadId, accountId });
+      // CRM sync — fire-and-forget
+      syncLeadToCrm(matchedLeadId).catch(err =>
+        logger.error('CRM sync error on reply', { leadId: matchedLeadId, error: String(err) }),
+      );
+    }
   }
 
   return savedCount;

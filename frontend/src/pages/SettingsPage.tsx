@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wifi, WifiOff, LogIn, Sparkles, Key, Mail } from 'lucide-react';
-import { settingsApi } from '../lib/api';
+import { Wifi, WifiOff, LogIn, Sparkles, Key, Mail, Link2 } from 'lucide-react';
+import { settingsApi, crmApi } from '../lib/api';
 
 interface SettingsData {
   my_name: string | null;
@@ -18,6 +18,15 @@ interface SettingsData {
   smtp_from: string | null;
   smtp_secure: string | null;
   smtp_password: string | null;
+  hubspot_api_key: string | null;
+  pipedrive_api_token: string | null;
+  pipedrive_domain: string | null;
+}
+
+type CrmTestResult = { ok: boolean; error?: string };
+interface CrmTestResults {
+  hubspot: CrmTestResult;
+  pipedrive: CrmTestResult;
 }
 
 export function SettingsPage() {
@@ -44,8 +53,13 @@ export function SettingsPage() {
     smtp_from: '',
     smtp_secure: '0',
     smtp_password: '',
+    hubspot_api_key: '',
+    pipedrive_api_token: '',
+    pipedrive_domain: '',
   });
   const [loginMsg, setLoginMsg] = useState('');
+  const [crmTestResult, setCrmTestResult] = useState<CrmTestResults | null>(null);
+  const [crmTesting, setCrmTesting] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -66,6 +80,9 @@ export function SettingsPage() {
         smtp_from: s.smtp_from ?? '',
         smtp_secure: s.smtp_secure ?? '0',
         smtp_password: s.smtp_password ?? '',
+        hubspot_api_key: s.hubspot_api_key ?? '',
+        pipedrive_api_token: s.pipedrive_api_token ?? '',
+        pipedrive_domain: s.pipedrive_domain ?? '',
       }));
     }
   }, [settings]);
@@ -311,6 +328,109 @@ export function SettingsPage() {
           className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors">
           {saveMutation.isPending ? 'Saving…' : 'Save SMTP Settings'}
         </button>
+      </div>
+
+      {/* CRM Integrations */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Link2 size={16} className="text-teal-500" />
+          <h2 className="font-semibold text-gray-900">CRM Integrations</h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          Automatically sync leads to your CRM when a connection is accepted or they reply.
+          Supports HubSpot and Pipedrive.
+        </p>
+
+        {/* HubSpot */}
+        <div className="border border-gray-100 rounded-lg p-4 space-y-3">
+          <p className="text-sm font-medium text-gray-800">HubSpot</p>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              <Key size={11} className="inline mr-1" />Private App Token
+            </label>
+            <input
+              type="password"
+              value={form.hubspot_api_key}
+              onChange={e => setForm(f => ({ ...f, hubspot_api_key: e.target.value }))}
+              placeholder={form.hubspot_api_key === '***' ? '••••••• (saved)' : 'pat-na1-...'}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Create in HubSpot → Settings → Integrations → Private Apps. Grant <em>CRM: contacts</em> scope.
+            </p>
+          </div>
+        </div>
+
+        {/* Pipedrive */}
+        <div className="border border-gray-100 rounded-lg p-4 space-y-3">
+          <p className="text-sm font-medium text-gray-800">Pipedrive</p>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              <Key size={11} className="inline mr-1" />API Token
+            </label>
+            <input
+              type="password"
+              value={form.pipedrive_api_token}
+              onChange={e => setForm(f => ({ ...f, pipedrive_api_token: e.target.value }))}
+              placeholder={form.pipedrive_api_token === '***' ? '••••••• (saved)' : 'Enter token…'}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Company Domain</label>
+            <div className="flex items-center gap-1">
+              <input
+                value={form.pipedrive_domain}
+                onChange={e => setForm(f => ({ ...f, pipedrive_domain: e.target.value }))}
+                placeholder="yourcompany"
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+              <span className="text-sm text-gray-400">.pipedrive.com</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Test result */}
+        {crmTestResult && (
+          <div className="space-y-1.5">
+            {(['hubspot', 'pipedrive'] as const).map(crm => (
+              <div key={crm} className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
+                crmTestResult[crm].ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+              }`}>
+                <span className="font-medium capitalize">{crm}:</span>
+                {crmTestResult[crm].ok ? '✓ Connected' : crmTestResult[crm].error || 'Failed'}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-40 transition-colors"
+          >
+            {saveMutation.isPending ? 'Saving…' : 'Save CRM Settings'}
+          </button>
+          <button
+            onClick={async () => {
+              setCrmTesting(true);
+              setCrmTestResult(null);
+              try {
+                const result = await crmApi.test();
+                setCrmTestResult(result as CrmTestResults);
+              } catch {
+                /* error handled by result state */
+              } finally {
+                setCrmTesting(false);
+              }
+            }}
+            disabled={crmTesting}
+            className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+          >
+            {crmTesting ? 'Testing…' : 'Test Connection'}
+          </button>
+        </div>
       </div>
 
       {/* Safe Limits info */}

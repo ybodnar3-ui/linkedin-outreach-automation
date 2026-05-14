@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search, Download } from 'lucide-react';
-import { leadsApi, campaignsApi } from '../lib/api';
+import { Upload, Plus, X, SkipForward, Mail, Sparkles, Search, Download, Link2 } from 'lucide-react';
+import { leadsApi, campaignsApi, crmApi } from '../lib/api';
 
 interface Lead {
   id: string;
@@ -25,6 +25,8 @@ interface Lead {
   mutual_connections: string | null;
   enriched_at: number | null;
   replied_at: number | null;
+  crm_contact_id: string | null;
+  crm_synced_at: number | null;
 }
 
 interface Campaign { id: string; name: string }
@@ -94,6 +96,11 @@ export function LeadsPage() {
   const addMutation = useMutation({
     mutationFn: () => leadsApi.create(addForm),
     onSuccess: () => { setShowAddModal(false); setAddForm({ campaign_id: '', linkedin_url: '', first_name: '', last_name: '', company: '', title: '' }); qc.invalidateQueries({ queryKey: ['leads'] }); },
+  });
+
+  const crmSyncMutation = useMutation({
+    mutationFn: (id: string) => crmApi.syncLead(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['leads'] }),
   });
 
   const leads: Lead[] = data?.leads ?? [];
@@ -196,14 +203,29 @@ export function LeadsPage() {
                   <span className={`font-medium ${STATUS_COLOR[l.status] ?? 'text-gray-500'}`}>
                     {STATUS_LABEL[l.status] ?? l.status}
                   </span>
+                  {l.crm_synced_at && (
+                    <span title={`Synced to CRM: ${l.crm_contact_id}`} className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-teal-600">
+                      <Link2 size={10} />CRM
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">{new Date(l.updated_at * 1000).toLocaleDateString()}</td>
                 <td className="px-4 py-3">
-                  {l.status !== 'skipped' && l.status !== 'completed' && (
-                    <button onClick={() => skipMutation.mutate(l.id)} className="text-gray-400 hover:text-yellow-600" title="Skip">
-                      <SkipForward size={14} />
+                  <div className="flex items-center gap-2">
+                    {l.status !== 'skipped' && l.status !== 'completed' && (
+                      <button onClick={() => skipMutation.mutate(l.id)} className="text-gray-400 hover:text-yellow-600" title="Skip">
+                        <SkipForward size={14} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => crmSyncMutation.mutate(l.id)}
+                      disabled={crmSyncMutation.isPending}
+                      className="text-gray-400 hover:text-teal-600 disabled:opacity-40"
+                      title={l.crm_synced_at ? 'Re-sync to CRM' : 'Sync to CRM'}
+                    >
+                      <Link2 size={14} />
                     </button>
-                  )}
+                  </div>
                 </td>
               </tr>
             ))}

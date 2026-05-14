@@ -74,6 +74,13 @@ export const inboxApi = {
     api.post(`/inbox/${threadId}/reply`, { text, account_id: accountId }).then(r => r.data),
 };
 
+// CRM integrations
+export const crmApi = {
+  test: () => api.post('/crm/test').then(r => r.data),
+  syncLead: (leadId: string) => api.post(`/crm/sync/${leadId}`).then(r => r.data),
+  syncAll: () => api.post('/crm/sync-all').then(r => r.data),
+};
+
 // A/B Tests
 export const abTestsApi = {
   list: () => api.get('/ab-tests').then(r => r.data),

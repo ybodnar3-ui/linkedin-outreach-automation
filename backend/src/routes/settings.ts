@@ -6,10 +6,12 @@ import { logger } from '../utils/logger';
 const router = Router();
 
 const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working_hours_end', 'icebreaker_enabled',
-  'smtp_host', 'smtp_port', 'smtp_user', 'smtp_from', 'smtp_secure'];
+  'smtp_host', 'smtp_port', 'smtp_user', 'smtp_from', 'smtp_secure',
+  'pipedrive_domain'];
 const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery', 'openai_api_key', 'anthropic_api_key',
-  'smtp_password'];
-const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key', 'smtp_password'];
+  'smtp_password', 'hubspot_api_key', 'pipedrive_api_token'];
+const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key', 'smtp_password',
+  'hubspot_api_key', 'pipedrive_api_token'];
 
 router.get('/', (_req: Request, res: Response) => {
   const settings: Record<string, string | null> = {};
@@ -28,6 +30,8 @@ router.get('/', (_req: Request, res: Response) => {
   settings['smtp_user'] = getSetting('smtp_user') || '';
   settings['smtp_from'] = getSetting('smtp_from') || '';
   settings['smtp_secure'] = getSetting('smtp_secure') || '0';
+  // CRM non-secret fields
+  settings['pipedrive_domain'] = getSetting('pipedrive_domain') || '';
   return res.json(settings);
 });
 

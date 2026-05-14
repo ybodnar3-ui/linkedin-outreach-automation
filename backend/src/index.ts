@@ -14,6 +14,7 @@ import accountsRouter from './routes/accounts';
 import inboxRouter from './routes/inbox';
 import abTestsRouter from './routes/abTests';
 import blacklistRouter from './routes/blacklist';
+import crmRouter from './routes/crm';
 
 const PORT = process.env.PORT || 3001;
 
@@ -56,6 +57,7 @@ app.use('/api/accounts', accountsRouter);
 app.use('/api/inbox', inboxRouter);
 app.use('/api/ab-tests', abTestsRouter);
 app.use('/api/blacklist', blacklistRouter);
+app.use('/api/crm', crmRouter);
 
 // Pause all campaigns emergency endpoint
 app.post('/api/pause-all', (_req, res) => {

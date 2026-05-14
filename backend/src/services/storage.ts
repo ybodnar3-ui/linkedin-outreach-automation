@@ -154,6 +154,9 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'enriched_at', 'INTEGER');
   // reply detection
   addColumnIfNotExists('leads', 'replied_at', 'INTEGER');
+  // CRM sync
+  addColumnIfNotExists('leads', 'crm_contact_id', 'TEXT');
+  addColumnIfNotExists('leads', 'crm_synced_at', 'INTEGER');
   // AI reply classification on inbox_messages
   addColumnIfNotExists('inbox_messages', 'sentiment', "TEXT CHECK(sentiment IN ('positive','negative','neutral','question','not_interested'))");
   addColumnIfNotExists('inbox_messages', 'sentiment_note', 'TEXT');
