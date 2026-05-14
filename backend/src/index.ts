@@ -16,6 +16,8 @@ import abTestsRouter from './routes/abTests';
 import blacklistRouter from './routes/blacklist';
 import crmRouter from './routes/crm';
 import webhooksRouter from './routes/webhooks';
+import authRouter from './routes/auth';
+import { requireAuth } from './middleware/auth';
 
 const PORT = process.env.PORT || 3001;
 
@@ -55,6 +57,7 @@ wss.on('error', (err) => {
   logger.error('WebSocketServer error', { error: String(err) });
 });
 
+// Public routes — no auth required
 app.get('/api/health', (_req, res) => {
   // first_run = true when no accounts AND no default session cookie file
   // browser.ts saves the default session to 'linkedin.json'
@@ -64,6 +67,11 @@ app.get('/api/health', (_req, res) => {
   logger.debug('Health check', { accountCount, hasSession, first_run: accountCount === 0 && !hasSession });
   res.json({ status: 'ok', ts: Date.now(), first_run: accountCount === 0 && !hasSession });
 });
+
+app.use('/api/auth', authRouter);
+
+// All routes below this line require a valid JWT
+app.use('/api', requireAuth);
 
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/leads', leadsRouter);
@@ -76,7 +84,7 @@ app.use('/api/blacklist', blacklistRouter);
 app.use('/api/crm', crmRouter);
 app.use('/api/webhooks', webhooksRouter);
 
-// Pause all campaigns emergency endpoint
+// Pause all campaigns emergency endpoint (protected by requireAuth above)
 app.post('/api/pause-all', (_req, res) => {
   db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE status = 'active'")
     .run(Math.floor(Date.now() / 1000));

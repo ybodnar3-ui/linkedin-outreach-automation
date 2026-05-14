@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Megaphone, Users, BarChart2, Settings,
   UserCircle, Inbox, ShieldOff, Zap, FlaskConical, Menu, X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, ReactNode } from 'react';
 
 const nav = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
@@ -27,7 +27,7 @@ const mobileNav = [
   { to: '/settings',  icon: Settings,        label: 'Settings' },
 ];
 
-export function Layout() {
+export function Layout({ logoutSlot }: { logoutSlot?: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -55,6 +55,7 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+        {logoutSlot}
       </aside>
 
       {/* ── Mobile slide-over menu ───────────────────────────────────────── */}
