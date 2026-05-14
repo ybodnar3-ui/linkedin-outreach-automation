@@ -2,6 +2,7 @@ import { BrowserContext, Page } from 'playwright';
 import { db } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
+import { classifyReply } from './replyClassifier';
 
 export interface InboxThread {
   thread_id: string;
@@ -119,6 +120,7 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
 
   const hasInbound = messages.some(m => m.direction === 'in');
   let savedCount = 0;
+  const newInboundIds: Array<{ id: string; text: string }> = [];
 
   for (const msg of messages) {
     const existing = db.prepare(
@@ -126,12 +128,22 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
     ).get(threadId, msg.direction, msg.timestamp);
 
     if (!existing) {
+      const newId = uuidv4();
       db.prepare(`
         INSERT INTO inbox_messages (id, account_id, thread_id, lead_id, direction, sender_name, text, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), accountId, threadId, matchedLeadId, msg.direction, msg.senderName, msg.text, msg.timestamp);
+      `).run(newId, accountId, threadId, matchedLeadId, msg.direction, msg.senderName, msg.text, msg.timestamp);
       savedCount++;
+      // Queue inbound messages for AI classification (fire-and-forget)
+      if (msg.direction === 'in') {
+        newInboundIds.push({ id: newId, text: msg.text });
+      }
     }
+  }
+
+  // AI-classify new inbound messages asynchronously (non-blocking)
+  for (const { id, text } of newInboundIds) {
+    classifyReply(id, text).catch(() => {});
   }
 
   // Mark lead as replied when inbound message found

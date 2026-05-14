@@ -3,12 +3,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Send, MessageSquare } from 'lucide-react';
 import { inboxApi } from '../lib/api';
 
+type Sentiment = 'positive' | 'negative' | 'neutral' | 'question' | 'not_interested';
+
 interface Thread {
   thread_id: string;
   participant_name: string | null;
   last_message: string;
   timestamp: number;
+  sentiment: Sentiment | null;
+  sentiment_note: string | null;
 }
+
+const SENTIMENT_CONFIG: Record<Sentiment, { label: string; cls: string }> = {
+  positive:       { label: '🟢 Interested',      cls: 'bg-green-100 text-green-700' },
+  question:       { label: '🔵 Question',         cls: 'bg-blue-100 text-blue-700' },
+  neutral:        { label: '⚪ Neutral',          cls: 'bg-gray-100 text-gray-600' },
+  not_interested: { label: '🟡 Not interested',   cls: 'bg-yellow-100 text-yellow-700' },
+  negative:       { label: '🔴 Negative',         cls: 'bg-red-100 text-red-700' },
+};
 
 interface Message {
   id: string;
@@ -76,10 +88,20 @@ export function InboxPage() {
                   selectedThread === thread.thread_id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''
                 }`}
               >
-                <p className="font-medium text-sm text-gray-900 truncate">
-                  {thread.participant_name || 'Unknown'}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-sm text-gray-900 truncate">
+                    {thread.participant_name || 'Unknown'}
+                  </p>
+                  {thread.sentiment && SENTIMENT_CONFIG[thread.sentiment] && (
+                    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${SENTIMENT_CONFIG[thread.sentiment].cls}`}>
+                      {SENTIMENT_CONFIG[thread.sentiment].label}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-500 truncate mt-0.5">{thread.last_message}</p>
+                {thread.sentiment_note && (
+                  <p className="text-xs text-gray-400 italic truncate mt-0.5">{thread.sentiment_note}</p>
+                )}
                 <p className="text-xs text-gray-400 mt-0.5">{formatTime(thread.timestamp)}</p>
               </button>
             ))
