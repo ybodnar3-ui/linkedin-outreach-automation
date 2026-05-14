@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { classifyReply } from './replyClassifier';
 import { syncLeadToCrm } from './crmSync';
+import { fireWebhookEvent } from './webhookService';
 
 export interface InboxThread {
   thread_id: string;
@@ -159,6 +160,16 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
       syncLeadToCrm(matchedLeadId).catch(err =>
         logger.error('CRM sync error on reply', { leadId: matchedLeadId, error: String(err) }),
       );
+      // Webhook event
+      const lead = db.prepare('SELECT linkedin_url, first_name, last_name, company, title FROM leads WHERE id = ?')
+        .get(matchedLeadId) as { linkedin_url: string; first_name: string | null; last_name: string | null; company: string | null; title: string | null } | undefined;
+      if (lead) {
+        fireWebhookEvent('replied', {
+          leadId: matchedLeadId, linkedinUrl: lead.linkedin_url,
+          firstName: lead.first_name, lastName: lead.last_name,
+          company: lead.company, title: lead.title, threadId,
+        }).catch(() => {});
+      }
     }
   }
 

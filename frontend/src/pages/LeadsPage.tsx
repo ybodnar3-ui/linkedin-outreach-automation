@@ -109,11 +109,11 @@ export function LeadsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Leads <span className="text-gray-400 text-base font-normal">({total})</span></h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowSalesNavModal(true)} className="flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors">
-            <Search size={15} /> Sales Navigator
+            <Search size={15} /> <span className="hidden sm:inline">Sales Navigator</span><span className="sm:hidden">SalesNav</span>
           </button>
           <button
             onClick={() => {
@@ -122,10 +122,10 @@ export function LeadsPage() {
             }}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors"
           >
-            <Download size={15} /> Export CSV
+            <Download size={15} /> <span className="hidden sm:inline">Export CSV</span>
           </button>
           <button onClick={() => setShowCsvModal(true)} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors">
-            <Upload size={15} /> Import CSV
+            <Upload size={15} /> <span className="hidden sm:inline">Import CSV</span>
           </button>
           <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
             <Plus size={15} /> Add Lead
@@ -146,7 +146,7 @@ export function LeadsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-100 bg-gray-50">
             <tr>

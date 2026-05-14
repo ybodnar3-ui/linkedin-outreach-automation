@@ -30,7 +30,7 @@ export function CampaignsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Campaigns</h1>
         <Link to="/campaigns/new" className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
           <Plus size={16} /> New Campaign

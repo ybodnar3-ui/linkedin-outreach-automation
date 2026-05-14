@@ -74,6 +74,16 @@ export const inboxApi = {
     api.post(`/inbox/${threadId}/reply`, { text, account_id: accountId }).then(r => r.data),
 };
 
+// Webhooks
+export const webhooksApi = {
+  list: () => api.get('/webhooks').then(r => r.data),
+  create: (data: { url: string; events: string[]; secret?: string }) =>
+    api.post('/webhooks', data).then(r => r.data),
+  delete: (id: string) => api.delete(`/webhooks/${id}`).then(r => r.data),
+  toggle: (id: string, active: boolean) => api.patch(`/webhooks/${id}`, { active }).then(r => r.data),
+  test: (id: string) => api.post(`/webhooks/${id}/test`).then(r => r.data),
+};
+
 // CRM integrations
 export const crmApi = {
   test: () => api.post('/crm/test').then(r => r.data),

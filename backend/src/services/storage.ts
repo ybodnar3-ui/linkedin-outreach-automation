@@ -157,6 +157,18 @@ export function initDb(): void {
   // CRM sync
   addColumnIfNotExists('leads', 'crm_contact_id', 'TEXT');
   addColumnIfNotExists('leads', 'crm_synced_at', 'INTEGER');
+
+  // Webhooks
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webhooks (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      events TEXT NOT NULL DEFAULT '[]',
+      secret TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+  `);
   // AI reply classification on inbox_messages
   addColumnIfNotExists('inbox_messages', 'sentiment', "TEXT CHECK(sentiment IN ('positive','negative','neutral','question','not_interested'))");
   addColumnIfNotExists('inbox_messages', 'sentiment_note', 'TEXT');

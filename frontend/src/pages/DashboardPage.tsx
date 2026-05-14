@@ -68,12 +68,12 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       {showWizard && <OnboardingWizard onDismiss={handleDismiss} />}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <span className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1 rounded-full ${sessionActive ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
             {sessionActive ? <Wifi size={14} /> : <WifiOff size={14} />}
-            LinkedIn {sessionActive ? 'Connected' : 'Disconnected'}
+            <span className="hidden sm:inline">LinkedIn </span>{sessionActive ? 'Connected' : 'Disconnected'}
           </span>
           <button
             onClick={() => campaignsApi.pauseAll()}

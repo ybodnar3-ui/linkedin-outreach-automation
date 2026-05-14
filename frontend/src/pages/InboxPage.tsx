@@ -63,7 +63,7 @@ export function InboxPage() {
   });
 
   return (
-    <div className="flex h-[calc(100vh-64px)]">
+    <div className="flex h-[calc(100vh-120px)] md:h-[calc(100vh-64px)]">
       {/* Thread list */}
       <div className="w-80 border-r border-gray-200 bg-white flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-gray-200">

@@ -11,6 +11,7 @@ import { getAssignedText } from '../services/abTest';
 import { generateIcebreaker } from '../services/icebreaker';
 import { sendEmail } from '../services/emailSender';
 import { syncLeadToCrm } from '../services/crmSync';
+import { fireWebhookEvent } from '../services/webhookService';
 
 const runningAccounts = new Set<string>();
 
@@ -266,10 +267,16 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
         logger.info('Connection accepted', { leadId: lead.id });
         broadcastLog('connection_accepted', { leadId: lead.id, url: lead.linkedin_url });
-        // CRM sync — fire and forget, non-blocking
+        // CRM sync — fire and forget
         syncLeadToCrm(lead.id).catch(err =>
           logger.error('CRM sync error on connection', { leadId: lead.id, error: String(err) }),
         );
+        // Webhook event
+        fireWebhookEvent('connection_accepted', {
+          leadId: lead.id, linkedinUrl: lead.linkedin_url,
+          firstName: lead.first_name, lastName: lead.last_name,
+          company: lead.company, title: lead.title,
+        }).catch(() => {});
       } else if (connStatus === 'pending') {
         const sentAt = lead.connection_sent_at || now;
         const daysPending = (now - sentAt) / 86400;
@@ -325,6 +332,11 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string)
       .run(Math.floor(Date.now() / 1000), lead.id);
     logger.info('Lead completed all steps', { leadId: lead.id });
     broadcastLog('lead_completed', { leadId: lead.id, url: lead.linkedin_url });
+    fireWebhookEvent('lead_completed', {
+      leadId: lead.id, linkedinUrl: lead.linkedin_url,
+      firstName: lead.first_name, lastName: lead.last_name,
+      company: lead.company, title: lead.title,
+    }).catch(() => {});
     return;
   }
 
@@ -335,6 +347,9 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string)
       .run(`blacklisted:${blacklistHit}`, Math.floor(Date.now() / 1000), lead.id);
     logger.info('Lead skipped — blacklisted', { leadId: lead.id, match: blacklistHit });
     broadcastLog('lead_skipped', { leadId: lead.id, reason: `blacklisted:${blacklistHit}` });
+    fireWebhookEvent('lead_skipped', {
+      leadId: lead.id, linkedinUrl: lead.linkedin_url, reason: `blacklisted:${blacklistHit}`,
+    }).catch(() => {});
     return;
   }
 
