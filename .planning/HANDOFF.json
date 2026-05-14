@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-12T12:32:14.643Z",
+  "timestamp": "2026-05-14T09:11:37.438Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -21,14 +21,18 @@
       "path": ".planning/HANDOFF.json"
     },
     {
+      "status": "M",
+      "path": "package-lock.json"
+    },
+    {
       "status": "??",
       "path": ".claude/"
     },
     {
       "status": "??",
-      "path": ".planning/phases/"
+      "path": ".planning/phases/04-advanced-features/"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\n267f72f docs: initialize project with full spec and LLM-friendly documentation\n03a6bbf Add GSD planning checkpoint\n072a6f0 Initial commit"
+  "context_notes": "Recent commits:\ne059a80 feat: add JWT auth + Railway deployment config\n25693ae hardening pass 4: fix critical bugs + add error handling + logging\nc29c5de fix(hardening): round-3 error handling and safety fixes\n2bd23ac feat: Proxycurl API — reliable profile enrichment with email discovery\n91ba6da feat: Webhooks, A/B Tests UI, mobile responsive layout"
 }
