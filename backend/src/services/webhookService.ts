@@ -17,6 +17,7 @@
  */
 
 import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import { db } from './storage';
 import { logger } from '../utils/logger';
 
@@ -101,7 +102,6 @@ export function listWebhooks(): Webhook[] {
 }
 
 export function createWebhook(url: string, events: WebhookEvent[], secret?: string): Webhook {
-  const { v4: uuidv4 } = require('uuid') as typeof import('uuid');
   const id = uuidv4();
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`

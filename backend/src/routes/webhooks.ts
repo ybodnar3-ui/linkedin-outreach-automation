@@ -18,6 +18,15 @@ router.post('/', (req: Request, res: Response) => {
   if (!url || !events?.length) {
     return res.status(400).json({ error: 'url and events[] required' });
   }
+  // Validate URL — must be http:// or https://
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return res.status(400).json({ error: 'url must use http or https protocol' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'url is not a valid URL' });
+  }
   // Validate events
   const invalid = events.filter(e => !ALL_EVENTS.includes(e as WebhookEvent));
   if (invalid.length) {
