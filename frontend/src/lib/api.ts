@@ -52,6 +52,7 @@ export const settingsApi = {
   update: (data: Record<string, string>) => api.put('/settings', data).then(r => r.data),
   login: () => api.post('/settings/login').then(r => r.data),
   session: () => api.get('/settings/session').then(r => r.data),
+  testProxycurl: () => api.post('/settings/proxycurl/test').then(r => r.data),
 };
 
 // Accounts (multi-account)

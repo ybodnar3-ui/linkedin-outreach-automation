@@ -21,6 +21,7 @@ interface SettingsData {
   hubspot_api_key: string | null;
   pipedrive_api_token: string | null;
   pipedrive_domain: string | null;
+  proxycurl_api_key: string | null;
 }
 
 type CrmTestResult = { ok: boolean; error?: string };
@@ -56,7 +57,10 @@ export function SettingsPage() {
     hubspot_api_key: '',
     pipedrive_api_token: '',
     pipedrive_domain: '',
+    proxycurl_api_key: '',
   });
+  const [proxycurlTestResult, setProxycurlTestResult] = useState<{ ok: boolean; credits?: number; error?: string } | null>(null);
+  const [proxycurlTesting, setProxycurlTesting] = useState(false);
   const [loginMsg, setLoginMsg] = useState('');
   const [crmTestResult, setCrmTestResult] = useState<CrmTestResults | null>(null);
   const [crmTesting, setCrmTesting] = useState(false);
@@ -83,6 +87,7 @@ export function SettingsPage() {
         hubspot_api_key: s.hubspot_api_key ?? '',
         pipedrive_api_token: s.pipedrive_api_token ?? '',
         pipedrive_domain: s.pipedrive_domain ?? '',
+        proxycurl_api_key: s.proxycurl_api_key ?? '',
       }));
     }
   }, [settings]);
@@ -328,6 +333,67 @@ export function SettingsPage() {
           className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors">
           {saveMutation.isPending ? 'Saving…' : 'Save SMTP Settings'}
         </button>
+      </div>
+
+      {/* Proxycurl */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Key size={16} className="text-indigo-500" />
+          <h2 className="font-semibold text-gray-900">Proxycurl <span className="text-xs font-normal text-gray-400 ml-1">Profile Enrichment API</span></h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          When configured, replaces Playwright DOM scraping with the Proxycurl API — more reliable, more data, includes email discovery.
+          <br />
+          <a href="https://nubela.co/proxycurl" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-xs">
+            Sign up at nubela.co/proxycurl
+          </a>
+          {' '}· ~$0.01 per profile · pay-as-you-go
+        </p>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            <Key size={12} className="inline mr-1" />API Key
+          </label>
+          <input
+            type="password"
+            value={form.proxycurl_api_key}
+            onChange={e => setForm(f => ({ ...f, proxycurl_api_key: e.target.value }))}
+            placeholder={form.proxycurl_api_key === '***' ? '••••••• (saved)' : 'Enter key…'}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+        </div>
+
+        {proxycurlTestResult && (
+          <div className={`text-xs px-3 py-2 rounded-lg ${proxycurlTestResult.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+            {proxycurlTestResult.ok
+              ? `✓ Connected — ${proxycurlTestResult.credits?.toLocaleString()} credits remaining`
+              : `✗ ${proxycurlTestResult.error}`}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors">
+            {saveMutation.isPending ? 'Saving…' : 'Save Key'}
+          </button>
+          <button
+            onClick={async () => {
+              setProxycurlTesting(true);
+              setProxycurlTestResult(null);
+              try {
+                const r = await settingsApi.testProxycurl();
+                setProxycurlTestResult(r as { ok: boolean; credits?: number; error?: string });
+              } catch {
+                setProxycurlTestResult({ ok: false, error: 'Request failed' });
+              } finally {
+                setProxycurlTesting(false);
+              }
+            }}
+            disabled={proxycurlTesting}
+            className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+          >
+            {proxycurlTesting ? 'Testing…' : 'Test & Check Credits'}
+          </button>
+        </div>
       </div>
 
       {/* CRM Integrations */}

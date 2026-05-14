@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSetting, setSetting } from '../services/storage';
 import { isSessionActive, startManualLogin } from '../services/browser';
+import { testProxycurlConnection } from '../services/proxycurl';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -9,9 +10,9 @@ const ALLOWED_SETTINGS = ['my_name', 'timezone', 'working_hours_start', 'working
   'smtp_host', 'smtp_port', 'smtp_user', 'smtp_from', 'smtp_secure',
   'pipedrive_domain'];
 const API_KEY_SETTINGS = ['hunter_api_key', 'apollo_api_key', 'auto_email_discovery', 'openai_api_key', 'anthropic_api_key',
-  'smtp_password', 'hubspot_api_key', 'pipedrive_api_token'];
+  'smtp_password', 'hubspot_api_key', 'pipedrive_api_token', 'proxycurl_api_key'];
 const MASKED_KEYS = ['hunter_api_key', 'apollo_api_key', 'openai_api_key', 'anthropic_api_key', 'smtp_password',
-  'hubspot_api_key', 'pipedrive_api_token'];
+  'hubspot_api_key', 'pipedrive_api_token', 'proxycurl_api_key'];
 
 router.get('/', (_req: Request, res: Response) => {
   const settings: Record<string, string | null> = {};
@@ -57,6 +58,17 @@ router.post('/login', (_req: Request, res: Response) => {
   startManualLogin().catch((err) => {
     logger.error('Manual login failed', { error: err instanceof Error ? err.message : String(err) });
   });
+});
+
+// POST /api/settings/proxycurl/test — check credits + connectivity
+router.post('/proxycurl/test', async (_req: Request, res: Response) => {
+  try {
+    const result = await testProxycurlConnection();
+    return res.json(result);
+  } catch (err) {
+    logger.error('Proxycurl test failed', { error: String(err) });
+    return res.status(500).json({ ok: false, error: 'Request failed' });
+  }
 });
 
 router.get('/session', async (_req: Request, res: Response) => {

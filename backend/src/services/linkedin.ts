@@ -4,6 +4,7 @@ import { getAccountProxy } from './accounts';
 import { incrementTracker } from './storage';
 import { applyHealthPenalty, incrementAccountTracker } from './accountHealth';
 import { scrapeProfileFields, saveEnrichedProfile } from './profileEnricher';
+import { fetchProxycurlProfile, toEnrichedProfile, saveProxycurlEmail, enrichLeadBasicFields } from './proxycurl';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 
@@ -101,11 +102,23 @@ export async function visitProfile(
     await humanScroll(page);
     await gaussianDelay(2000, 4000);
 
-    // Scrape enrichment fields while page is open
+    // Enrich profile — try Proxycurl API first, fall back to Playwright DOM scraping
     if (leadId) {
       try {
-        const enriched = await scrapeProfileFields(page);
-        saveEnrichedProfile(leadId, enriched);
+        const proxycurlData = await fetchProxycurlProfile(linkedinUrl);
+        if (proxycurlData) {
+          // Proxycurl succeeded — richer and more reliable data
+          const enriched = toEnrichedProfile(proxycurlData);
+          saveEnrichedProfile(leadId, enriched);
+          saveProxycurlEmail(leadId, proxycurlData);
+          enrichLeadBasicFields(leadId, proxycurlData);
+          logger.info('Profile enriched via Proxycurl', { leadId });
+        } else {
+          // No Proxycurl key or request failed — scrape from the open page
+          const enriched = await scrapeProfileFields(page);
+          saveEnrichedProfile(leadId, enriched);
+          logger.info('Profile enriched via Playwright scraping', { leadId });
+        }
       } catch (err) {
         logger.warn('Profile enrichment failed (non-fatal)', { leadId, error: String(err) });
       }
