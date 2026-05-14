@@ -79,6 +79,8 @@ export const accountsApi = {
   create: (data: { name: string; email?: string }) => api.post('/accounts', data).then(r => r.data),
   delete: (id: string) => api.delete(`/accounts/${id}`).then(r => r.data),
   login: (id: string) => api.post(`/accounts/${id}/login`).then(r => r.data),
+  importCookies: (id: string, cookies: unknown[]) =>
+    api.post(`/accounts/${id}/import-cookies`, { cookies }).then(r => r.data),
   setProxy: (id: string, proxy: { host: string; port: string; user: string; password: string }) =>
     api.put(`/accounts/${id}/proxy`, proxy).then(r => r.data),
   clearProxy: (id: string) =>
