@@ -9,3 +9,4 @@ data/logs/
 .env.*
 !.env.example
 backend/public/
+.claude/worktrees/
