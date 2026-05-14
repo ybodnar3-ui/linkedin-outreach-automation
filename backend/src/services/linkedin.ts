@@ -321,6 +321,103 @@ export async function followProfile(linkedinUrl: string, accountId = '__legacy__
   }
 }
 
+/**
+ * Send a LinkedIn InMail to a 2nd/3rd degree connection.
+ * Requires LinkedIn Premium / Sales Navigator on the account.
+ * InMail button appears as "Message" for non-connections on Premium accounts.
+ *
+ * Returns: 'sent' | 'no_inmail_button' | 'limit_reached' | 'error'
+ */
+export async function sendInMail(
+  linkedinUrl: string,
+  subject: string,
+  body: string,
+  accountId = '__legacy__',
+): Promise<'sent' | 'no_inmail_button' | 'limit_reached' | 'error'> {
+  const { gaussianDelay, humanMouseMove, humanType } = await import('../utils/humanizer');
+  const page = await getPage(accountId);
+
+  try {
+    await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gaussianDelay(2000, 3500);
+
+    const warning = await checkForWarnings(page);
+    if (warning.hasWarning) {
+      logger.warn('Warning during InMail attempt', warning);
+      if (warning.type === 'captcha') applyHealthPenalty(accountId, 'captcha');
+      else applyHealthPenalty(accountId, 'warning');
+      return 'error';
+    }
+
+    // InMail button — on Premium, non-connections have a "Message" button
+    // that opens InMail composer instead of regular chat
+    const inmailBtn = await page.$(
+      'button[aria-label*="InMail"], button[aria-label*="Message"]:not([disabled])',
+    );
+    if (!inmailBtn) {
+      logger.info('No InMail button found', { url: linkedinUrl });
+      return 'no_inmail_button';
+    }
+
+    await humanMouseMove(page, inmailBtn);
+    await inmailBtn.click();
+    await gaussianDelay(1500, 2500);
+
+    // Check for InMail limit message
+    const limitMsg = await page.textContent('body').catch(() => '');
+    if (limitMsg?.includes('InMail credit') || limitMsg?.includes('out of InMail')) {
+      logger.warn('InMail credits exhausted', { accountId });
+      return 'limit_reached';
+    }
+
+    // Fill subject
+    const subjectInput = await page.$('input[name="subject"], input[placeholder*="ubject"], .compose-form__subject-field input');
+    if (subjectInput) {
+      await subjectInput.click();
+      await gaussianDelay(300, 600);
+      await humanType(page, subjectInput, subject);
+      await gaussianDelay(400, 800);
+    }
+
+    // Fill body
+    const bodyBox = await page.$(
+      '.compose-form__message-field, div[role="textbox"], textarea[placeholder*="message" i], .msg-form__contenteditable',
+    );
+    if (!bodyBox) {
+      logger.warn('InMail body field not found', { url: linkedinUrl });
+      return 'error';
+    }
+    await bodyBox.click();
+    await gaussianDelay(400, 800);
+    await humanType(page, bodyBox as Parameters<typeof humanType>[1], body);
+    await gaussianDelay(800, 1500);
+
+    // Send
+    const sendBtn = await page.$('button[type="submit"], button[aria-label*="Send"], .compose-form__send-btn');
+    if (sendBtn) {
+      await humanMouseMove(page, sendBtn);
+      await sendBtn.click();
+    } else {
+      await page.keyboard.press('Control+Enter');
+    }
+
+    await gaussianDelay(1500, 2500);
+
+    const warningAfter = await checkForWarnings(page);
+    if (warningAfter.hasWarning) {
+      applyHealthPenalty(accountId, 'warning');
+      return 'error';
+    }
+
+    incrementAccountTracker(accountId, 'messages_sent');
+    logger.info('InMail sent', { url: linkedinUrl, accountId, subject });
+    broadcastLog('inmail_sent', { url: linkedinUrl, accountId });
+    return 'sent';
+  } finally {
+    await page.close();
+  }
+}
+
 export async function checkConnectionStatus(linkedinUrl: string, accountId = '__legacy__'): Promise<'connected' | 'pending' | 'none'> {
   const { gaussianDelay } = await import('../utils/humanizer');
   const page = await getPage(accountId);

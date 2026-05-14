@@ -13,7 +13,7 @@ import { Plus, GripVertical, Trash2, ArrowLeft } from 'lucide-react';
 import { campaignsApi } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
 
-type ActionType = 'visit' | 'follow' | 'connect' | 'message' | 'check_connection' | 'wait' | 'send_email';
+type ActionType = 'visit' | 'follow' | 'connect' | 'message' | 'send_inmail' | 'check_connection' | 'wait' | 'send_email';
 type Condition = 'always' | 'if_connected' | 'if_not_replied';
 
 interface Step {
@@ -31,6 +31,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   follow: 'Follow Profile',
   connect: 'Send Connection',
   message: 'Send Message',
+  send_inmail: 'Send InMail',
   check_connection: 'Check Connection',
   wait: 'Wait',
   send_email: 'Send Email',
@@ -41,6 +42,7 @@ const ACTION_COLORS: Record<ActionType, string> = {
   follow: 'bg-sky-50 border-sky-200',
   connect: 'bg-green-50 border-green-200',
   message: 'bg-purple-50 border-purple-200',
+  send_inmail: 'bg-indigo-50 border-indigo-200',
   check_connection: 'bg-yellow-50 border-yellow-200',
   wait: 'bg-gray-50 border-gray-200',
   send_email: 'bg-orange-50 border-orange-200',
@@ -62,7 +64,7 @@ function SortableStep({ step, onChange, onDelete }: {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: step._id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
-  const hasText = step.action === 'connect' || step.action === 'message' || step.action === 'send_email';
+  const hasText = step.action === 'connect' || step.action === 'message' || step.action === 'send_email' || step.action === 'send_inmail';
   const maxLen = step.action === 'connect' ? 300 : 1900;
 
   return (
@@ -108,7 +110,7 @@ function SortableStep({ step, onChange, onDelete }: {
         </div>
       )}
 
-      {step.action === 'send_email' && (
+      {(step.action === 'send_email' || step.action === 'send_inmail') && (
         <div className="space-y-2">
           <input
             value={step.email_subject}

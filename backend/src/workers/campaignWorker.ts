@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 import { isWithinWorkingHours } from '../utils/delays';
 import { canAccountPerformAction, runNightlyHealthBonus } from '../services/accountHealth';
-import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile } from '../services/linkedin';
+import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile, sendInMail } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
@@ -230,6 +230,31 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
       const sent = await sendEmail({ to: lead.email, subject, body });
       if (sent) {
         broadcastLog('email_sent', { leadId: lead.id, to: lead.email });
+      }
+      await actionDelay();
+      break;
+    }
+    case 'send_inmail': {
+      if (!step.message_text) {
+        logger.warn('send_inmail step: no body configured', { stepId: step.id });
+        break;
+      }
+      if (!canAccountPerformAction(accountId, 'message')) {
+        logger.info('Daily message limit reached (inmail)', { accountId });
+        return;
+      }
+      const inmailSubject = step.email_subject
+        ? await renderTemplate(step.email_subject, lead)
+        : `Hi ${lead.first_name || 'there'}`;
+      const inmailBody = await renderTemplate(step.message_text, lead);
+      const result = await sendInMail(lead.linkedin_url, inmailSubject, inmailBody, accountId);
+      if (result === 'sent') {
+        db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
+        broadcastLog('inmail_sent', { leadId: lead.id, url: lead.linkedin_url });
+      } else if (result === 'limit_reached') {
+        logger.warn('InMail credits exhausted — pausing campaign', { accountId });
+        broadcastLog('inmail_limit_reached', { accountId });
+        return; // stop processing this cycle
       }
       await actionDelay();
       break;
