@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3001;
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -30,14 +30,29 @@ export function broadcastLog(event: string, data: unknown): void {
   const message = JSON.stringify({ event, data, ts: Date.now() });
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
+      try {
+        client.send(message);
+      } catch (err) {
+        logger.warn('WebSocket send failed', { error: String(err) });
+      }
     }
   });
 }
 
 wss.on('connection', (ws) => {
   logger.info('WebSocket client connected');
-  ws.send(JSON.stringify({ event: 'connected', data: { message: 'Connected to log stream' }, ts: Date.now() }));
+  ws.on('error', (err) => {
+    logger.warn('WebSocket client error', { error: String(err) });
+  });
+  try {
+    ws.send(JSON.stringify({ event: 'connected', data: { message: 'Connected to log stream' }, ts: Date.now() }));
+  } catch (err) {
+    logger.warn('WebSocket initial send failed', { error: String(err) });
+  }
+});
+
+wss.on('error', (err) => {
+  logger.error('WebSocketServer error', { error: String(err) });
 });
 
 app.get('/api/health', (_req, res) => {
@@ -74,7 +89,8 @@ app.post('/api/pause-all', (_req, res) => {
 const publicDir = path.join(__dirname, '..', 'public');
 if (fs.existsSync(publicDir)) {
   app.use(express.static(publicDir));
-  app.get('*', (_req, res) => {
+  // Catch-all for SPA — must NOT intercept /api/* routes
+  app.get(/^(?!\/api\/).*/, (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 }
@@ -105,6 +121,16 @@ import('./workers/inboxPoller').then(({ startInboxPoller }) => {
   logger.info('Inbox poller started');
 }).catch((err) => {
   logger.error('Failed to start inbox poller', { error: err instanceof Error ? err.message : String(err) });
+});
+
+// Catch unhandled promise rejections / uncaught exceptions so the process doesn't silently die
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', { reason: String(reason) });
+});
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', { error: err.message, stack: err.stack });
+  // Give the logger a tick to flush, then exit — let the process manager restart us
+  setTimeout(() => process.exit(1), 500);
 });
 
 server.listen(PORT, () => {

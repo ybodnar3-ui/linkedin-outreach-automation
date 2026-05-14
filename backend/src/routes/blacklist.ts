@@ -15,6 +15,9 @@ router.get('/', (_req: Request, res: Response) => {
 router.post('/', (req: Request, res: Response) => {
   const { value, type = 'domain' } = req.body;
   if (!value) return res.status(400).json({ error: 'value required' });
+  if (!['domain', 'company'].includes(type)) {
+    return res.status(400).json({ error: "type must be 'domain' or 'company'" });
+  }
   const cleaned = value.trim().toLowerCase();
   try {
     db.prepare('INSERT INTO blacklist (id, value, type) VALUES (?, ?, ?)').run(uuidv4(), cleaned, type);

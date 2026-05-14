@@ -14,6 +14,7 @@ import { syncLeadToCrm } from '../services/crmSync';
 import { fireWebhookEvent } from '../services/webhookService';
 
 const runningAccounts = new Set<string>();
+let cycleRunning = false;
 
 interface Campaign {
   id: string;
@@ -68,21 +69,25 @@ interface Lead {
 
 async function renderTemplate(template: string, lead: Lead): Promise<string> {
   const myName = getSetting('my_name') || '';
-  let result = template
-    .replace(/\{firstName\}/g, lead.first_name || '')
-    .replace(/\{lastName\}/g, lead.last_name || '')
-    .replace(/\{company\}/g, lead.company || '')
-    .replace(/\{title\}/g, lead.title || '')
-    .replace(/\{myName\}/g, myName)
-    // Enrichment variables
-    .replace(/\{headline\}/g, lead.headline || '')
-    .replace(/\{summary\}/g, lead.summary || '')
-    .replace(/\{location\}/g, lead.location || '')
-    .replace(/\{yearsAtCompany\}/g, lead.years_at_company || '')
-    .replace(/\{school\}/g, lead.school || '')
-    .replace(/\{recentPost\}/g, lead.recent_post || '')
-    .replace(/\{mutualConnections\}/g, lead.mutual_connections || '')
-    .replace(/\{skills\}/g, lead.skills || '');
+
+  // Use function replacer to avoid $& / $` / $' backreference issues in replacement strings
+  const sub = (str: string, pattern: RegExp, value: string): string =>
+    str.replace(pattern, () => value);
+
+  let result = template;
+  result = sub(result, /\{firstName\}/g,         lead.first_name      || '');
+  result = sub(result, /\{lastName\}/g,           lead.last_name       || '');
+  result = sub(result, /\{company\}/g,            lead.company         || '');
+  result = sub(result, /\{title\}/g,              lead.title           || '');
+  result = sub(result, /\{myName\}/g,             myName);
+  result = sub(result, /\{headline\}/g,           lead.headline        || '');
+  result = sub(result, /\{summary\}/g,            lead.summary         || '');
+  result = sub(result, /\{location\}/g,           lead.location        || '');
+  result = sub(result, /\{yearsAtCompany\}/g,     lead.years_at_company || '');
+  result = sub(result, /\{school\}/g,             lead.school          || '');
+  result = sub(result, /\{recentPost\}/g,         lead.recent_post     || '');
+  result = sub(result, /\{mutualConnections\}/g,  lead.mutual_connections || '');
+  result = sub(result, /\{skills\}/g,             lead.skills          || '');
 
   // AI Icebreaker — only call API if the template actually uses {icebreaker}
   if (result.includes('{icebreaker}')) {
@@ -95,7 +100,7 @@ async function renderTemplate(template: string, lead: Lead): Promise<string> {
       skills: lead.skills,
       location: lead.location,
     });
-    result = result.replace(/\{icebreaker\}/g, icebreaker);
+    result = sub(result, /\{icebreaker\}/g, icebreaker);
   }
 
   return result;
@@ -128,16 +133,23 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
   switch (condition) {
     case 'always':
       return true;
-    case 'if_connected':
+    case 'if_connected': {
       if (lead.connected_at) return true;
       // Check live using the correct account's browser context
-      const status = await checkConnectionStatus(lead.linkedin_url, accountId);
-      if (status === 'connected') {
-        db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?')
-          .run(Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), lead.id);
-        return true;
+      try {
+        const status = await checkConnectionStatus(lead.linkedin_url, accountId);
+        if (status === 'connected') {
+          db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?')
+            .run(Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), lead.id);
+          return true;
+        }
+      } catch (err) {
+        logger.warn('checkConnectionStatus failed', {
+          leadId: lead.id, error: err instanceof Error ? err.message : String(err),
+        });
       }
       return false;
+    }
     case 'if_not_replied':
       return lead.connected_at != null;
     default:
@@ -159,7 +171,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
   switch (step.action) {
     case 'visit': {
       if (!canAccountPerformAction(accountId, 'visit')) {
-        logger.info('Daily visit limit reached', { accountId });
+        logger.info('Daily visit limit reached — deferring to tomorrow', { accountId });
+        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
       await visitProfile(lead.linkedin_url, accountId, lead.id);
@@ -169,7 +184,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
     case 'follow': {
       // Follow without connecting — softer first touchpoint
       if (!canAccountPerformAction(accountId, 'visit')) {
-        logger.info('Daily visit limit reached (follow)', { accountId });
+        logger.info('Daily visit limit reached (follow) — deferring to tomorrow', { accountId });
+        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
       await followProfile(lead.linkedin_url, accountId);
@@ -178,8 +196,11 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
     }
     case 'connect': {
       if (!canAccountPerformAction(accountId, 'connection')) {
-        logger.info('Daily connection limit reached', { accountId });
+        logger.info('Daily connection limit reached — deferring to tomorrow', { accountId });
         broadcastLog('limit_reached', { action: 'connection', accountId });
+        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
       let rawNote = step.message_text;
@@ -204,8 +225,11 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         break;
       }
       if (!canAccountPerformAction(accountId, 'message')) {
-        logger.info('Daily message limit reached', { accountId });
+        logger.info('Daily message limit reached — deferring to tomorrow', { accountId });
         broadcastLog('limit_reached', { action: 'message', accountId });
+        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
       const text = await renderTemplate(rawText, lead);
@@ -242,7 +266,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         break;
       }
       if (!canAccountPerformAction(accountId, 'message')) {
-        logger.info('Daily message limit reached (inmail)', { accountId });
+        logger.info('Daily message limit reached (inmail) — deferring to tomorrow', { accountId });
+        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
+        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
       const inmailSubject = step.email_subject
@@ -449,9 +476,16 @@ export function pauseAllCampaigns(): void {
 export function startWorker(): void {
   // Main 5-minute campaign worker
   cron.schedule('*/5 * * * *', () => {
-    runWorkerCycle().catch((err) => {
-      logger.error('Unhandled worker error', { error: err instanceof Error ? err.message : String(err) });
-    });
+    if (cycleRunning) {
+      logger.warn('Previous worker cycle still running — skipping this tick');
+      return;
+    }
+    cycleRunning = true;
+    runWorkerCycle()
+      .catch((err) => {
+        logger.error('Unhandled worker error', { error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => { cycleRunning = false; });
   });
 
   // Nightly health bonus at 00:05 — +5 to all active accounts that had no penalties

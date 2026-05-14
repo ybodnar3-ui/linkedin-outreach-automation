@@ -1,4 +1,6 @@
 import cron from 'node-cron';
+import fs from 'fs';
+import path from 'path';
 import { logger } from '../utils/logger';
 import { scrapeInbox } from '../services/inbox';
 import { getBrowser, getBrowserForAccount } from '../services/browser';
@@ -12,15 +14,20 @@ async function runInboxPoll(): Promise<void> {
   isPolling = true;
 
   try {
-    // Scrape legacy single-account inbox
-    try {
-      const legacyContext = await getBrowser();
-      const count = await scrapeInbox('__legacy__', legacyContext);
-      if (count > 0) {
-        broadcastLog('inbox_new_messages', { account: 'legacy', count });
+    // Scrape legacy single-account inbox (only when a session file exists)
+    const legacySessionFile = path.join(process.cwd(), '..', 'data', 'sessions', 'linkedin.json');
+    if (fs.existsSync(legacySessionFile)) {
+      try {
+        const legacyContext = await getBrowser();
+        const count = await scrapeInbox('__legacy__', legacyContext);
+        if (count > 0) {
+          broadcastLog('inbox_new_messages', { account: 'legacy', count });
+        }
+      } catch (err) {
+        logger.warn('Legacy inbox poll failed', { error: err instanceof Error ? err.message : String(err) });
       }
-    } catch (err) {
-      logger.warn('Legacy inbox poll failed', { error: err instanceof Error ? err.message : String(err) });
+    } else {
+      logger.debug('No legacy session file — skipping legacy inbox poll');
     }
 
     // Scrape per-account inboxes

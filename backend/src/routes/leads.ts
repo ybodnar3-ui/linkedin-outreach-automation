@@ -15,7 +15,9 @@ const LINKEDIN_URL_PATTERN = /^https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+(\/)?
 
 router.get('/', (req: Request, res: Response) => {
   const { campaign_id, status, page = '1', limit = '50' } = req.query;
-  const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
+  const pageNum  = Math.max(1, parseInt(page  as string, 10) || 1);
+  const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
+  const offset   = (pageNum - 1) * limitNum;
 
   let query = 'SELECT * FROM leads WHERE 1=1';
   const params: unknown[] = [];
@@ -24,7 +26,7 @@ router.get('/', (req: Request, res: Response) => {
   if (status) { query += ' AND status = ?'; params.push(status); }
 
   query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  params.push(parseInt(limit as string), offset);
+  params.push(limitNum, offset);
 
   const leads = db.prepare(query).all(...params);
   const total = (db.prepare('SELECT COUNT(*) as n FROM leads WHERE 1=1' +
@@ -32,7 +34,58 @@ router.get('/', (req: Request, res: Response) => {
     (status ? ' AND status = ?' : ''))
     .get(...params.slice(0, -2)) as { n: number }).n;
 
-  return res.json({ leads, total, page: parseInt(page as string), limit: parseInt(limit as string) });
+  return res.json({ leads, total, page: pageNum, limit: limitNum });
+});
+
+// GET /api/leads/export/csv — MUST be registered before /:id
+router.get('/export/csv', (req: Request, res: Response) => {
+  const { campaign_id } = req.query;
+
+  let leads: Record<string, unknown>[];
+  if (campaign_id) {
+    leads = db.prepare('SELECT * FROM leads WHERE campaign_id = ? ORDER BY created_at ASC').all(campaign_id as string) as Record<string, unknown>[];
+  } else {
+    leads = db.prepare('SELECT * FROM leads ORDER BY created_at ASC').all() as Record<string, unknown>[];
+  }
+
+  if (leads.length === 0) {
+    return res.status(404).json({ error: 'No leads found' });
+  }
+
+  const COLUMNS = [
+    'id', 'campaign_id', 'linkedin_url',
+    'first_name', 'last_name', 'company', 'title', 'email',
+    'status', 'headline', 'location', 'years_at_company', 'school',
+    'skills', 'recent_post', 'mutual_connections', 'summary',
+    'connection_sent_at', 'connected_at', 'replied_at', 'last_message_at',
+    'created_at', 'updated_at',
+  ];
+
+  // Formula injection guard — prefix =+-@ with a single quote so spreadsheets treat it as text
+  const escape = (val: unknown): string => {
+    if (val === null || val === undefined) return '';
+    let str = String(val);
+    if (/^[=+\-@]/.test(str)) str = `'${str}`;
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const header = COLUMNS.join(',');
+  const rows = leads.map(lead =>
+    COLUMNS.map(col => escape(lead[col])).join(',')
+  );
+
+  const csvOutput = [header, ...rows].join('\n');
+  const filename = campaign_id
+    ? `leads-campaign-${campaign_id}-${Date.now()}.csv`
+    : `leads-all-${Date.now()}.csv`;
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  logger.info('Leads exported', { campaign_id: campaign_id ?? 'all', count: leads.length });
+  return res.send(csvOutput);
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -89,56 +142,6 @@ router.post('/:id/skip', (req: Request, res: Response) => {
     .run(reason ?? 'manual', now, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
   return res.json({ ok: true });
-});
-
-// GET /api/leads/export/csv — export all leads for a campaign as CSV
-router.get('/export/csv', (req: Request, res: Response) => {
-  const { campaign_id } = req.query;
-
-  let leads: Record<string, unknown>[];
-  if (campaign_id) {
-    leads = db.prepare('SELECT * FROM leads WHERE campaign_id = ? ORDER BY created_at ASC').all(campaign_id as string) as Record<string, unknown>[];
-  } else {
-    leads = db.prepare('SELECT * FROM leads ORDER BY created_at ASC').all() as Record<string, unknown>[];
-  }
-
-  if (leads.length === 0) {
-    return res.status(404).json({ error: 'No leads found' });
-  }
-
-  const COLUMNS = [
-    'id', 'campaign_id', 'linkedin_url',
-    'first_name', 'last_name', 'company', 'title', 'email',
-    'status', 'headline', 'location', 'years_at_company', 'school',
-    'skills', 'recent_post', 'mutual_connections', 'summary',
-    'connection_sent_at', 'connected_at', 'replied_at', 'last_message_at',
-    'created_at', 'updated_at',
-  ];
-
-  const escape = (val: unknown): string => {
-    if (val === null || val === undefined) return '';
-    const str = String(val);
-    // Wrap in quotes if contains comma, quote, or newline
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-      return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
-  };
-
-  const header = COLUMNS.join(',');
-  const rows = leads.map(lead =>
-    COLUMNS.map(col => escape(lead[col])).join(',')
-  );
-
-  const csv = [header, ...rows].join('\n');
-  const filename = campaign_id
-    ? `leads-campaign-${campaign_id}-${Date.now()}.csv`
-    : `leads-all-${Date.now()}.csv`;
-
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  logger.info('Leads exported', { campaign_id: campaign_id ?? 'all', count: leads.length });
-  return res.send(csv);
 });
 
 router.post('/import/csv', upload.single('file'), async (req: Request, res: Response) => {

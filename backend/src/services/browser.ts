@@ -70,7 +70,8 @@ export function loadSession(): Parameters<BrowserContext['addCookies']>[0] | nul
   if (!fs.existsSync(SESSION_FILE)) return null;
   try {
     return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
-  } catch {
+  } catch (err) {
+    logger.warn('Corrupt session file — ignoring', { file: SESSION_FILE, error: String(err) });
     return null;
   }
 }
@@ -134,7 +135,9 @@ export async function getBrowserForAccount(
     try {
       const cookies = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
       await context.addCookies(cookies);
-    } catch { /* ignore corrupt session */ }
+    } catch (err) {
+      logger.warn('Corrupt account session file — starting without cookies', { accountId, sessionFile, error: String(err) });
+    }
   }
 
   _accountBrowsers.set(accountId, { browser, context });
