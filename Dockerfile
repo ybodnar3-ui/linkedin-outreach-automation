@@ -1,5 +1,8 @@
 FROM mcr.microsoft.com/playwright:v1.60.0-jammy
 
+# Cache bust: 2026-05-14
+ARG CACHEBUST=1
+
 WORKDIR /app
 
 # Install Node deps (ignore native addons — build separately below)
