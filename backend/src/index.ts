@@ -3,6 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import cron from 'node-cron';
 import { WebSocketServer, WebSocket } from 'ws';
 import { initDb, db } from './services/storage';
 import { logger } from './utils/logger';
@@ -15,6 +16,7 @@ import inboxRouter from './routes/inbox';
 import abTestsRouter from './routes/abTests';
 import blacklistRouter from './routes/blacklist';
 import crmRouter from './routes/crm';
+import crmPipelineRouter from './routes/crmPipeline';
 import webhooksRouter from './routes/webhooks';
 import authRouter from './routes/auth';
 import { requireAuth } from './middleware/auth';
@@ -82,6 +84,7 @@ app.use('/api/inbox', inboxRouter);
 app.use('/api/ab-tests', abTestsRouter);
 app.use('/api/blacklist', blacklistRouter);
 app.use('/api/crm', crmRouter);
+app.use('/api/crm-pipeline', crmPipelineRouter);
 app.use('/api/webhooks', webhooksRouter);
 
 // Pause all campaigns emergency endpoint (protected by requireAuth above)
@@ -130,6 +133,30 @@ import('./workers/inboxPoller').then(({ startInboxPoller }) => {
 }).catch((err) => {
   logger.error('Failed to start inbox poller', { error: err instanceof Error ? err.message : String(err) });
 });
+
+// Background LinkedIn feed activity — 3× per day, 70% random chance per account slot
+// Runs at 09:00, 13:00, 17:00 UTC — makes the account look like an active human user
+cron.schedule('0 9,13,17 * * *', async () => {
+  try {
+    const { doBackgroundFeedActivity } = await import('./services/linkedin');
+    const accounts = db.prepare("SELECT id FROM accounts WHERE status = 'active'").all() as Array<{ id: string }>;
+    logger.info('Background feed activity cron fired', { activeAccounts: accounts.length });
+    for (const acc of accounts) {
+      // 70% random chance — more human-like than doing it every single time
+      if (Math.random() < 0.7) {
+        const count = Math.floor(Math.random() * 5) + 3; // 3–7 likes
+        doBackgroundFeedActivity(acc.id, count)
+          .then(liked => logger.info('Background activity done', { accountId: acc.id, liked }))
+          .catch(err => logger.warn('Background activity error', { accountId: acc.id, error: String(err) }));
+        // Stagger accounts — wait 30-90s between each
+        await new Promise(r => setTimeout(r, 30000 + Math.random() * 60000));
+      }
+    }
+  } catch (err) {
+    logger.error('Background activity cron error', { error: String(err) });
+  }
+});
+logger.info('Background feed activity cron scheduled (09:00, 13:00, 17:00 UTC)');
 
 // Catch unhandled promise rejections / uncaught exceptions so the process doesn't silently die
 process.on('unhandledRejection', (reason) => {

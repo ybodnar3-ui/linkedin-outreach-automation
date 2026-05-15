@@ -114,6 +114,13 @@ export const crmApi = {
   syncAll: () => api.post('/crm/sync-all').then(r => r.data),
 };
 
+// Built-in CRM Pipeline (Kanban)
+export const crmPipelineApi = {
+  list: () => api.get('/crm-pipeline').then(r => r.data),
+  update: (id: string, data: { stage?: string; notes?: string; next_follow_up?: number | null }) =>
+    api.put(`/crm-pipeline/${id}`, data).then(r => r.data),
+};
+
 // A/B Tests
 export const abTestsApi = {
   list: () => api.get('/ab-tests').then(r => r.data),

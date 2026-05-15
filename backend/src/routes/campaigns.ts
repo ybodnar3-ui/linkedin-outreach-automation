@@ -40,11 +40,36 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 router.put('/:id', (req: Request, res: Response) => {
-  const { name, timezone, website } = req.body;
+  const { name, timezone, website, steps } = req.body;
   const now = Math.floor(Date.now() / 1000);
-  const result = db.prepare('UPDATE campaigns SET name = COALESCE(?, name), timezone = COALESCE(?, timezone), website = ?, updated_at = ? WHERE id = ?')
-    .run(name ?? null, timezone ?? null, website ?? null, now, req.params.id);
+
+  const result = db.prepare(
+    'UPDATE campaigns SET name = COALESCE(?, name), timezone = COALESCE(?, timezone), website = ?, updated_at = ? WHERE id = ?',
+  ).run(name ?? null, timezone ?? null, website ?? null, now, req.params.id);
+
   if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
+
+  // Re-sync steps if provided — delete all old ones, insert the new set
+  if (Array.isArray(steps)) {
+    db.prepare('DELETE FROM campaign_steps WHERE campaign_id = ?').run(req.params.id);
+    const insertStep = db.prepare(
+      'INSERT INTO campaign_steps (id, campaign_id, step_order, action, wait_days, condition, message_text, email_subject) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    for (const step of steps) {
+      insertStep.run(
+        uuidv4(),
+        req.params.id,
+        step.step_order,
+        step.action,
+        step.wait_days ?? 0,
+        step.condition ?? 'always',
+        step.message_text ?? null,
+        step.email_subject ?? null,
+      );
+    }
+    logger.info('Campaign steps updated', { id: req.params.id, stepCount: steps.length });
+  }
+
   return res.json({ ok: true });
 });
 

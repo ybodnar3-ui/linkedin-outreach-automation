@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 import { isWithinWorkingHours } from '../utils/delays';
 import { canAccountPerformAction, runNightlyHealthBonus } from '../services/accountHealth';
-import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile, sendInMail } from '../services/linkedin';
+import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile, sendInMail, likeRecentPosts, scrapeContactInfo } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
@@ -219,6 +219,11 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
           .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
+      // Like 1-2 recent posts before connecting — warms up the lead, improves accept rate
+      // Fire-and-forget so we don't block the worker if liking fails or is slow
+      likeRecentPosts(lead.linkedin_url, accountId).catch(err =>
+        logger.warn('likeRecentPosts failed (non-fatal)', { leadId: lead.id, error: String(err) }),
+      );
       let rawNote = step.message_text;
       if (step.ab_test_id && rawNote) {
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
@@ -310,6 +315,17 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
         logger.info('Connection accepted', { leadId: lead.id });
         broadcastLog('connection_accepted', { leadId: lead.id, url: lead.linkedin_url });
+        // Scrape contact info (email/phone) — free, no Proxycurl needed.
+        // Fire-and-forget: saves to DB when done, doesn't block campaign flow.
+        scrapeContactInfo(lead.linkedin_url, accountId)
+          .then(({ email, phone }) => {
+            if (email || phone) {
+              db.prepare('UPDATE leads SET email = COALESCE(email, ?), updated_at = ? WHERE id = ?')
+                .run(email ?? null, Math.floor(Date.now() / 1000), lead.id);
+              logger.info('Contact info saved after connection', { leadId: lead.id, email, phone });
+            }
+          })
+          .catch(err => logger.warn('scrapeContactInfo failed (non-fatal)', { leadId: lead.id, error: String(err) }));
         // CRM sync — fire and forget
         syncLeadToCrm(lead.id).catch(err =>
           logger.error('CRM sync error on connection', { leadId: lead.id, error: String(err) }),

@@ -15,6 +15,7 @@ import { InboxPage } from './pages/InboxPage';
 import { BlacklistPage } from './pages/BlacklistPage';
 import { WebhooksPage } from './pages/WebhooksPage';
 import { ABTestsPage } from './pages/ABTestsPage';
+import { CRMPage } from './pages/CRMPage';
 import { LoginPage } from './pages/LoginPage';
 
 function AuthGuard({ children }: { children: ReactNode }) {
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route path="/blacklist" element={<BlacklistPage />} />
         <Route path="/webhooks" element={<WebhooksPage />} />
         <Route path="/ab-tests" element={<ABTestsPage />} />
+        <Route path="/crm" element={<CRMPage />} />
       </Route>
     </Routes>
   );

@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, Megaphone, Users, BarChart2, Settings,
-  UserCircle, Inbox, ShieldOff, Zap, FlaskConical, Menu, X,
+  UserCircle, Inbox, ShieldOff, Zap, FlaskConical, Columns3, Menu, X,
 } from 'lucide-react';
 import { useState, ReactNode } from 'react';
 
@@ -10,6 +10,7 @@ const nav = [
   { to: '/campaigns',  icon: Megaphone,        label: 'Campaigns' },
   { to: '/leads',      icon: Users,            label: 'Leads' },
   { to: '/inbox',      icon: Inbox,            label: 'Inbox' },
+  { to: '/crm',        icon: Columns3,         label: 'CRM Pipeline' },
   { to: '/analytics',  icon: BarChart2,        label: 'Analytics' },
   { to: '/ab-tests',   icon: FlaskConical,     label: 'A/B Tests' },
   { to: '/webhooks',   icon: Zap,              label: 'Webhooks' },

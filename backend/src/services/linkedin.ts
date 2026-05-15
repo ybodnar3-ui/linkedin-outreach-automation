@@ -451,3 +451,178 @@ export async function checkConnectionStatus(linkedinUrl: string, accountId = '__
     await page.close();
   }
 }
+
+/**
+ * Like 1-2 recent posts on a lead's profile before sending a connection request.
+ * Warms up the interaction so the lead recognises the name — improves accept rate.
+ * Returns number of posts liked. Errors are swallowed (non-fatal).
+ */
+export async function likeRecentPosts(linkedinUrl: string, accountId = '__legacy__'): Promise<number> {
+  const { gaussianDelay, humanMouseMove } = await import('../utils/humanizer');
+  const page = await getPage(accountId);
+  let liked = 0;
+
+  try {
+    const activityUrl = linkedinUrl.replace(/\/$/, '') + '/recent-activity/all/';
+    await page.goto(activityUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gaussianDelay(2000, 3500);
+
+    const warning = await checkForWarnings(page);
+    if (warning.hasWarning) return 0;
+
+    // Scroll to load posts
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.scrollBy(0, 500));
+      await gaussianDelay(600, 1000);
+    }
+
+    // Only like posts that haven't been liked yet (aria-pressed="false")
+    const likeButtons = await page.$$(
+      'button[aria-label*="Like"][aria-pressed="false"], button[aria-label^="React Like"]',
+    );
+
+    const toClick = likeButtons.slice(0, 2); // max 2 likes per visit
+    for (const btn of toClick) {
+      try {
+        await humanMouseMove(page, btn);
+        await gaussianDelay(500, 1200);
+        await btn.click();
+        await gaussianDelay(800, 1500);
+        liked++;
+      } catch { /* ignore individual like errors — button may have disappeared */ }
+    }
+
+    if (liked > 0) {
+      logger.info('Liked recent posts before connection request', { url: linkedinUrl, accountId, liked });
+      broadcastLog('posts_liked', { url: linkedinUrl, accountId, liked });
+    }
+    return liked;
+  } catch (err) {
+    logger.warn('likeRecentPosts error (non-fatal)', { url: linkedinUrl, accountId, error: String(err) });
+    return 0;
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Background feed activity — likes N random posts from the home feed.
+ * Runs periodically (cron) to make the account appear like an active human user.
+ * Returns number of posts liked.
+ */
+export async function doBackgroundFeedActivity(accountId = '__legacy__', count = 5): Promise<number> {
+  const { gaussianDelay, humanMouseMove } = await import('../utils/humanizer');
+  const page = await getPage(accountId);
+  let liked = 0;
+
+  try {
+    await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gaussianDelay(2000, 4000);
+
+    const warning = await checkForWarnings(page);
+    if (warning.hasWarning) {
+      logger.warn('Warning during background feed activity', { accountId, warning });
+      return 0;
+    }
+
+    // Scroll down to load feed posts
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.scrollBy(0, 600));
+      await gaussianDelay(700, 1200);
+    }
+
+    const likeButtons = await page.$$('button[aria-label*="Like"][aria-pressed="false"]');
+
+    if (likeButtons.length === 0) {
+      logger.debug('No unliked posts found in feed', { accountId });
+      return 0;
+    }
+
+    // Pick a random subset — more human-like than always liking from the top
+    const shuffled = [...likeButtons].sort(() => Math.random() - 0.5).slice(0, count);
+    for (const btn of shuffled) {
+      try {
+        await humanMouseMove(page, btn);
+        await gaussianDelay(1000, 2500);
+        await btn.click();
+        await gaussianDelay(1500, 3000);
+        liked++;
+      } catch { /* ignore */ }
+    }
+
+    if (liked > 0) {
+      logger.info('Background feed activity done', { accountId, liked });
+      broadcastLog('background_activity', { accountId, liked });
+    }
+    return liked;
+  } catch (err) {
+    logger.warn('doBackgroundFeedActivity error (non-fatal)', { accountId, error: String(err) });
+    return 0;
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Scrape email + phone from the LinkedIn "Contact info" modal.
+ * Only works after the account is connected with the lead — LinkedIn shows contact
+ * info to 1st-degree connections only.
+ * Returns null values if nothing found or the lead made nothing public.
+ */
+export async function scrapeContactInfo(
+  linkedinUrl: string,
+  accountId = '__legacy__',
+): Promise<{ email: string | null; phone: string | null }> {
+  const { gaussianDelay } = await import('../utils/humanizer');
+  const page = await getPage(accountId);
+
+  try {
+    await page.goto(linkedinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gaussianDelay(1500, 2500);
+
+    // Click the "Contact info" link in the profile header
+    const contactLink = await page.$('a[href*="/overlay/contact-info/"], a[id*="contact-info"]');
+    if (!contactLink) {
+      logger.debug('No contact info link found — lead may not have any public', { url: linkedinUrl });
+      return { email: null, phone: null };
+    }
+
+    await contactLink.click();
+    await gaussianDelay(1500, 2500);
+
+    // Wait for modal to open
+    await page.waitForSelector(
+      '.pv-contact-info__contact-type, .ci-email, [data-section="emailAddress"]',
+      { timeout: 8000 },
+    ).catch(() => {}); // non-fatal if modal doesn't load
+
+    const result = await page.evaluate(() => {
+      // Email
+      const emailEl =
+        document.querySelector('.ci-email a') ||
+        document.querySelector('[data-section="emailAddress"] a') ||
+        document.querySelector('section.pv-contact-info__contact-type a[href^="mailto:"]');
+      const email = emailEl
+        ? (emailEl as HTMLAnchorElement).href.replace('mailto:', '').trim()
+        : null;
+
+      // Phone
+      const phoneEl =
+        document.querySelector('.ci-phone span.t-14') ||
+        document.querySelector('[data-section="phone"] span');
+      const phone = phoneEl?.textContent?.trim() ?? null;
+
+      return { email, phone };
+    });
+
+    if (result.email) {
+      logger.info('Email scraped from contact info', { url: linkedinUrl, accountId, email: result.email });
+    }
+    return result;
+  } catch (err) {
+    logger.warn('scrapeContactInfo error (non-fatal)', { url: linkedinUrl, accountId, error: String(err) });
+    return { email: null, phone: null };
+  } finally {
+    await page.close();
+  }
+}

@@ -154,9 +154,13 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'enriched_at', 'INTEGER');
   // reply detection
   addColumnIfNotExists('leads', 'replied_at', 'INTEGER');
-  // CRM sync
+  // CRM sync (HubSpot / Pipedrive)
   addColumnIfNotExists('leads', 'crm_contact_id', 'TEXT');
   addColumnIfNotExists('leads', 'crm_synced_at', 'INTEGER');
+  // Built-in CRM pipeline
+  addColumnIfNotExists('leads', 'crm_stage', "TEXT CHECK(crm_stage IN ('new','contacted','replied','call_booked','won','lost'))");
+  addColumnIfNotExists('leads', 'crm_notes', 'TEXT');
+  addColumnIfNotExists('leads', 'crm_next_follow_up', 'INTEGER');
 
   // Webhooks
   db.exec(`
