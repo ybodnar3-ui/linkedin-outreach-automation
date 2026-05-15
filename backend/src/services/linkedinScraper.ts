@@ -56,74 +56,85 @@ function parseName(full: string): { first: string | null; last: string | null } 
 
 /**
  * Scrape one page of LinkedIn people search results.
- * Returns array of raw card data strings (JSON).
+ * Uses a layout-agnostic approach: finds all /in/ profile links,
+ * then walks up the DOM to find the card container and extract name/title/company.
+ * This is resilient to LinkedIn's frequent HTML structure changes.
  */
 async function scrapeOnePage(page: import('playwright').Page): Promise<ScrapedLead[]> {
-  // Wait for search results to appear
-  await page.waitForSelector(
-    '.reusable-search__result-container, .entity-result, [data-chameleon-result-urn]',
-    { timeout: 15000 },
-  ).catch(() => {});
+  // Wait for any profile link to appear — works regardless of container class names
+  await page.waitForSelector('a[href*="/in/"]', { timeout: 15000 }).catch(() => {});
 
-  // Scroll to trigger lazy-loading
-  for (let i = 0; i < 4; i++) {
+  // Scroll to trigger lazy-loading of all cards
+  for (let i = 0; i < 5; i++) {
     await page.evaluate(() => window.scrollBy(0, 500));
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(350);
   }
 
   const results = await page.evaluate(() => {
-    const cards: Array<{
-      name: string;
-      title: string;
-      company: string;
-      href: string;
-    }> = [];
+    const cards: Array<{ name: string; title: string; company: string; href: string }> = [];
+    const seenHrefs = new Set<string>();
 
-    // Try multiple container selectors (LinkedIn A/B tests different layouts)
-    const containers = [
-      ...document.querySelectorAll('li.reusable-search__result-container'),
-      ...document.querySelectorAll('div.entity-result'),
-      ...document.querySelectorAll('[data-chameleon-result-urn]'),
-    ];
+    // Grab every /in/ profile link on the page
+    const allLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
 
-    // De-duplicate by element reference
-    const seen = new Set<Element>();
-    for (const el of containers) {
-      if (seen.has(el)) continue;
-      seen.add(el);
+    for (const linkEl of allLinks) {
+      const href = linkEl.href || '';
+      // Must be a clean profile URL — skip nav links, "people also viewed", etc.
+      if (!href.includes('linkedin.com/in/')) continue;
+      // Normalise: strip query params and trailing slash variations
+      const cleanHref = href.split('?')[0].replace(/\/$/, '');
+      if (seenHrefs.has(cleanHref)) continue;
+      seenHrefs.add(cleanHref);
 
-      // Profile link — must be /in/ URL
-      const linkEl = (
-        el.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null
-      );
-      if (!linkEl?.href) continue;
+      // Walk up to find the card container (li or div that holds the full result)
+      let card: Element = linkEl;
+      for (let i = 0; i < 8; i++) {
+        const parent = card.parentElement;
+        if (!parent) break;
+        // Stop at list items or large divs that look like result cards
+        const tag = parent.tagName.toLowerCase();
+        if (tag === 'li' || (tag === 'div' && (parent.getAttribute('data-view-name') || parent.className.includes('result')))) {
+          card = parent;
+          break;
+        }
+        card = parent;
+      }
 
-      // Name — try aria-hidden span inside the link first
+      // Name: prefer aria-hidden span inside the link (LinkedIn's pattern for screen-reader dupe text)
       const nameEl =
         linkEl.querySelector('span[aria-hidden="true"]') ||
-        el.querySelector('.entity-result__title-text span[aria-hidden="true"]') ||
-        el.querySelector('.actor-name') ||
+        linkEl.querySelector('span:not([class*="visually"])') ||
         linkEl;
-      const name = nameEl?.textContent?.trim() ?? '';
+      const rawName = nameEl?.textContent?.trim() ?? '';
+      // Skip anonymous "LinkedIn Member" cards
+      if (!rawName || rawName.toLowerCase().includes('linkedin member')) continue;
+      // Skip "Connect", "Follow" button text that sometimes appears in links
+      if (rawName.length > 60 || rawName.toLowerCase().includes('connect')) continue;
 
-      // Title / headline
-      const titleEl =
-        el.querySelector('.entity-result__primary-subtitle') ||
-        el.querySelector('.subline-level-1') ||
-        el.querySelector('[class*="primary-subtitle"]');
-      const title = titleEl?.textContent?.trim() ?? '';
+      // Title/headline: first non-name text block below the link within the card
+      let title = '';
+      let company = '';
+      const textNodes = Array.from(card.querySelectorAll('span, div, p'))
+        .filter(el => {
+          const t = el.textContent?.trim() ?? '';
+          return (
+            t.length > 0 &&
+            t !== rawName &&
+            !t.includes('Connect') &&
+            !t.includes('Follow') &&
+            !t.includes('Message') &&
+            !t.includes('Premium') &&
+            el.children.length === 0 // leaf nodes only
+          );
+        })
+        .map(el => el.textContent!.trim());
 
-      // Company
-      const companyEl =
-        el.querySelector('.entity-result__secondary-subtitle') ||
-        el.querySelector('.subline-level-2') ||
-        el.querySelector('[class*="secondary-subtitle"]');
-      const company = companyEl?.textContent?.trim() ?? '';
+      // First distinct text is headline/title, second may be company
+      const filtered = textNodes.filter(t => t !== rawName);
+      if (filtered[0]) title = filtered[0].substring(0, 120);
+      if (filtered[1] && filtered[1] !== title) company = filtered[1].substring(0, 120);
 
-      // Skip "LinkedIn Member" placeholder cards (anonymous)
-      if (!name || name.toLowerCase().includes('linkedin member')) continue;
-
-      cards.push({ name, title, company, href: linkEl.href });
+      cards.push({ name: rawName, title, company, href: cleanHref });
     }
 
     return cards;
@@ -192,7 +203,10 @@ export async function scrapeLinkedInSearch(
 
     // Check session is still valid
     const currentUrl = page.url();
-    if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint')) {
+    const pageTitle = await page.title().catch(() => '');
+    logger.info('Page loaded', { accountId, currentUrl: currentUrl.substring(0, 100), pageTitle });
+
+    if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint') || currentUrl.includes('/authwall')) {
       await page.close();
       return {
         leads: [],
@@ -201,6 +215,12 @@ export async function scrapeLinkedInSearch(
         errors: ['LinkedIn session expired — please reconnect the account via Accounts page.'],
       };
     }
+
+    // Count /in/ links as a quick diagnostic
+    const linkCount = await page.evaluate(() =>
+      document.querySelectorAll('a[href*="/in/"]').length,
+    );
+    logger.info('Profile links found on page', { accountId, linkCount });
 
     // Extract total results count from the header
     try {
