@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-14T09:11:37.438Z",
+  "timestamp": "2026-05-15T06:36:55.789Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -22,17 +22,21 @@
     },
     {
       "status": "M",
-      "path": "package-lock.json"
+      "path": "backend/src/routes/campaigns.ts"
     },
     {
-      "status": "??",
-      "path": ".claude/"
+      "status": "M",
+      "path": "backend/src/services/storage.ts"
     },
     {
-      "status": "??",
-      "path": ".planning/phases/04-advanced-features/"
+      "status": "M",
+      "path": "backend/src/workers/campaignWorker.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/pages/CampaignBuilderPage.tsx"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\ne059a80 feat: add JWT auth + Railway deployment config\n25693ae hardening pass 4: fix critical bugs + add error handling + logging\nc29c5de fix(hardening): round-3 error handling and safety fixes\n2bd23ac feat: Proxycurl API — reliable profile enrichment with email discovery\n91ba6da feat: Webhooks, A/B Tests UI, mobile responsive layout"
+  "context_notes": "Recent commits:\n006ecf0 feat: add free LinkedIn people search scraper\n88e1724 feat: add LinkedIn cookie import flow for remote server\n568afd9 fix: WebSocket mixed content crash on HTTPS (Railway)\n1c87d4a fix: switch to node:20-bookworm-slim + manual playwright install\n62a1b18 fix: TypeScript errors blocking Docker build"
 }

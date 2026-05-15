@@ -50,7 +50,7 @@ const ACTION_COLORS: Record<ActionType, string> = {
 
 const TEMPLATE_VARS = [
   // Basic
-  '{firstName}', '{lastName}', '{company}', '{title}', '{myName}',
+  '{firstName}', '{lastName}', '{company}', '{title}', '{myName}', '{website}',
   // Enrichment — auto-filled after visitProfile step runs
   '{headline}', '{location}', '{yearsAtCompany}', '{school}',
   '{skills}', '{recentPost}', '{mutualConnections}', '{summary}',
@@ -164,12 +164,14 @@ export function CampaignBuilderPage() {
 
   const [name, setName] = useState('');
   const [timezone, setTimezone] = useState('America/New_York');
+  const [website, setWebsite] = useState('');
   const [steps, setSteps] = useState<Step[]>([]);
 
   useEffect(() => {
     if (existing) {
       setName(existing.name);
       setTimezone(existing.timezone);
+      setWebsite(existing.website ?? '');
       setSteps((existing.steps ?? []).map((s: Omit<Step, '_id'>) => ({
         ...s,
         _id: uuidv4(),
@@ -219,6 +221,7 @@ export function CampaignBuilderPage() {
     return {
       name,
       timezone,
+      website: website || null,
       steps: steps.map((s, i) => ({
         step_order: i + 1, action: s.action, wait_days: s.wait_days,
         condition: s.condition, message_text: s.message_text || null,
@@ -251,6 +254,17 @@ export function CampaignBuilderPage() {
             value={timezone} onChange={e => setTimezone(e.target.value)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Portfolio / Website URL <span className="text-gray-400 font-normal">(підставляється як {'{website}'} в повідомленнях)</span>
+          </label>
+          <input
+            value={website} onChange={e => setWebsite(e.target.value)}
+            placeholder="https://your-portfolio.com"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          <p className="text-xs text-gray-400 mt-1">Залиш порожнім поки портфоліо не готове — додаси пізніше</p>
         </div>
       </div>
 

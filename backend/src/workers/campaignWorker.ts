@@ -22,6 +22,7 @@ interface Campaign {
   status: string;
   timezone: string;
   account_id: string | null;
+  website: string | null;
 }
 
 interface CampaignStep {
@@ -67,19 +68,23 @@ interface Lead {
   replied_at: number | null;
 }
 
-async function renderTemplate(template: string, lead: Lead): Promise<string> {
+async function renderTemplate(template: string, lead: Lead, campaignWebsite?: string | null): Promise<string> {
   const myName = getSetting('my_name') || '';
+  const website = campaignWebsite || '';
 
   // Use function replacer to avoid $& / $` / $' backreference issues in replacement strings
   const sub = (str: string, pattern: RegExp, value: string): string =>
     str.replace(pattern, () => value);
 
   let result = template;
+
+  // Single-brace format: {firstName} — original format
   result = sub(result, /\{firstName\}/g,         lead.first_name      || '');
   result = sub(result, /\{lastName\}/g,           lead.last_name       || '');
   result = sub(result, /\{company\}/g,            lead.company         || '');
   result = sub(result, /\{title\}/g,              lead.title           || '');
   result = sub(result, /\{myName\}/g,             myName);
+  result = sub(result, /\{website\}/g,            website);
   result = sub(result, /\{headline\}/g,           lead.headline        || '');
   result = sub(result, /\{summary\}/g,            lead.summary         || '');
   result = sub(result, /\{location\}/g,           lead.location        || '');
@@ -89,8 +94,18 @@ async function renderTemplate(template: string, lead: Lead): Promise<string> {
   result = sub(result, /\{mutualConnections\}/g,  lead.mutual_connections || '');
   result = sub(result, /\{skills\}/g,             lead.skills          || '');
 
+  // Double-brace aliases: {{first_name}} — user-friendly format
+  result = sub(result, /\{\{first_name\}\}/g,     lead.first_name      || '');
+  result = sub(result, /\{\{last_name\}\}/g,      lead.last_name       || '');
+  result = sub(result, /\{\{company\}\}/g,        lead.company         || '');
+  result = sub(result, /\{\{title\}\}/g,          lead.title           || '');
+  result = sub(result, /\{\{my_name\}\}/g,        myName);
+  result = sub(result, /\{\{website\}\}/g,        website);
+  result = sub(result, /\{\{headline\}\}/g,       lead.headline        || '');
+  result = sub(result, /\{\{location\}\}/g,       lead.location        || '');
+
   // AI Icebreaker — only call API if the template actually uses {icebreaker}
-  if (result.includes('{icebreaker}')) {
+  if (result.includes('{icebreaker}') || result.includes('{{icebreaker}}')) {
     const icebreaker = await generateIcebreaker({
       firstName: lead.first_name || '',
       headline: lead.headline,
@@ -101,6 +116,7 @@ async function renderTemplate(template: string, lead: Lead): Promise<string> {
       location: lead.location,
     });
     result = sub(result, /\{icebreaker\}/g, icebreaker);
+    result = sub(result, /\{\{icebreaker\}\}/g, icebreaker);
   }
 
   return result;
@@ -157,7 +173,7 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
   }
 }
 
-async function executeStep(lead: Lead, step: CampaignStep, accountId: string): Promise<void> {
+async function executeStep(lead: Lead, step: CampaignStep, accountId: string, website?: string | null): Promise<void> {
   const conditionMet = await checkCondition(step.condition, lead, accountId);
   if (!conditionMet) {
     logger.info('Condition not met, skipping step', { leadId: lead.id, step: step.step_order, condition: step.condition });
@@ -207,7 +223,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
       if (step.ab_test_id && rawNote) {
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
       }
-      const note = rawNote ? await renderTemplate(rawNote, lead) : undefined;
+      const note = rawNote ? await renderTemplate(rawNote, lead, website) : undefined;
       const sent = await sendConnectionRequest(lead.linkedin_url, note, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -232,7 +248,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
           .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
-      const text = await renderTemplate(rawText, lead);
+      const text = await renderTemplate(rawText, lead, website);
       const sent = await sendMessage(lead.linkedin_url, text, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -250,9 +266,9 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         break;
       }
       const subject = step.email_subject
-        ? await renderTemplate(step.email_subject, lead)
+        ? await renderTemplate(step.email_subject, lead, website)
         : `Hi ${lead.first_name || 'there'}`;
-      const body = await renderTemplate(step.message_text, lead);
+      const body = await renderTemplate(step.message_text, lead, website);
       const sent = await sendEmail({ to: lead.email, subject, body });
       if (sent) {
         broadcastLog('email_sent', { leadId: lead.id, to: lead.email });
@@ -273,9 +289,9 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
         return;
       }
       const inmailSubject = step.email_subject
-        ? await renderTemplate(step.email_subject, lead)
+        ? await renderTemplate(step.email_subject, lead, website)
         : `Hi ${lead.first_name || 'there'}`;
-      const inmailBody = await renderTemplate(step.message_text, lead);
+      const inmailBody = await renderTemplate(step.message_text, lead, website);
       const result = await sendInMail(lead.linkedin_url, inmailSubject, inmailBody, accountId);
       if (result === 'sent') {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -351,7 +367,7 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string): P
     .run(step.step_order + 1, nextActionAt, now, lead.id);
 }
 
-async function processLead(lead: Lead, steps: CampaignStep[], accountId: string): Promise<void> {
+async function processLead(lead: Lead, steps: CampaignStep[], accountId: string, website?: string | null): Promise<void> {
   const step = steps.find(s => s.step_order === lead.current_step);
 
   if (!step) {
@@ -383,7 +399,7 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string)
   db.prepare("UPDATE leads SET status = 'in_progress', updated_at = ? WHERE id = ?")
     .run(Math.floor(Date.now() / 1000), lead.id);
 
-  await executeStep(lead, step, accountId);
+  await executeStep(lead, step, accountId, website);
 }
 
 /** Process all campaigns for a given accountId (or __legacy__ for unassigned campaigns) */
@@ -434,7 +450,7 @@ async function runCampaignsForAccount(accountId: string): Promise<void> {
       for (const lead of leads) {
         try {
           broadcastLog('lead_processing', { leadId: lead.id, url: lead.linkedin_url, campaign: campaign.name, accountId });
-          await processLead(lead, steps, accountId);
+          await processLead(lead, steps, accountId, campaign.website);
           await leadDelay();
         } catch (err) {
           logger.error('Error processing lead', {

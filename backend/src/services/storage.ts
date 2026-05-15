@@ -192,6 +192,9 @@ export function initDb(): void {
   `);
 
   // per-account daily tracker table
+  // Migrations — safe on existing DBs
+  addColumnIfNotExists('campaigns', 'website', 'TEXT');
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS account_daily_tracker (
       account_id TEXT NOT NULL,

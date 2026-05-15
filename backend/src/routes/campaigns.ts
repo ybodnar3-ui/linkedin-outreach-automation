@@ -18,14 +18,14 @@ router.get('/:id', (req: Request, res: Response) => {
 });
 
 router.post('/', (req: Request, res: Response) => {
-  const { name, timezone = 'America/New_York', steps = [] } = req.body;
+  const { name, timezone = 'America/New_York', website = null, steps = [] } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const id = uuidv4();
   const now = Math.floor(Date.now() / 1000);
 
-  db.prepare('INSERT INTO campaigns (id, name, timezone, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, name, timezone, 'draft', now, now);
+  db.prepare('INSERT INTO campaigns (id, name, timezone, website, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, name, timezone, website, 'draft', now, now);
 
   const insertStep = db.prepare(
     'INSERT INTO campaign_steps (id, campaign_id, step_order, action, wait_days, condition, message_text, email_subject) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -40,10 +40,10 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 router.put('/:id', (req: Request, res: Response) => {
-  const { name, timezone } = req.body;
+  const { name, timezone, website } = req.body;
   const now = Math.floor(Date.now() / 1000);
-  const result = db.prepare('UPDATE campaigns SET name = COALESCE(?, name), timezone = COALESCE(?, timezone), updated_at = ? WHERE id = ?')
-    .run(name ?? null, timezone ?? null, now, req.params.id);
+  const result = db.prepare('UPDATE campaigns SET name = COALESCE(?, name), timezone = COALESCE(?, timezone), website = ?, updated_at = ? WHERE id = ?')
+    .run(name ?? null, timezone ?? null, website ?? null, now, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Not found' });
   return res.json({ ok: true });
 });
