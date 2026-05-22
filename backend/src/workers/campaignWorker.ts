@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { v4 as uuidv4 } from 'uuid';
 import { db, getSetting } from '../services/storage';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
@@ -173,6 +174,57 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
   }
 }
 
+// ── Chrome Extension helpers ──────────────────────────────────────────────────
+
+/**
+ * Returns true if the Chrome Extension for this account has pinged within the last 5 minutes.
+ * When the extension is active, we queue tasks for it instead of running Playwright.
+ */
+function isExtensionActive(accountId: string): boolean {
+  const lastSeen = getSetting(`ext_last_seen_${accountId}`);
+  if (!lastSeen) return false;
+  const elapsed = Math.floor(Date.now() / 1000) - parseFloat(lastSeen);
+  return elapsed < 300; // active if seen within 5 min
+}
+
+/**
+ * Queue an action for the Chrome Extension to execute.
+ * Sets the lead's next_action_at to 2 hours from now so the worker won't
+ * pick it up again while the extension is working on it.
+ * The extension result handler (routes/extension.ts) advances the step when done.
+ */
+function queueExtensionTask(
+  lead: Lead,
+  action: string,
+  payload: Record<string, unknown>,
+  accountId: string,
+): void {
+  const taskId = uuidv4();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Check if there's already a pending/claimed task for this lead to avoid duplicates
+  const existing = db.prepare(
+    "SELECT id FROM extension_tasks WHERE lead_id = ? AND status IN ('pending','claimed') LIMIT 1",
+  ).get(lead.id);
+  if (existing) {
+    logger.debug('Extension task already queued for lead — skipping duplicate', { leadId: lead.id });
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO extension_tasks (id, account_id, lead_id, action, payload, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `).run(taskId, accountId, lead.id, action, JSON.stringify(payload), now);
+
+  // Defer next pick-up for 2 hours (task timeout is 30 min — this is a safe buffer)
+  db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+    .run(now + 7200, now, lead.id);
+
+  logger.info('Extension task queued', { taskId, action, leadId: lead.id, accountId });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function executeStep(lead: Lead, step: CampaignStep, accountId: string, website?: string | null): Promise<void> {
   const conditionMet = await checkCondition(step.condition, lead, accountId);
   if (!conditionMet) {
@@ -193,6 +245,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
           .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
+      if (isExtensionActive(accountId)) {
+        queueExtensionTask(lead, 'visit_profile', { profileUrl: lead.linkedin_url }, accountId);
+        return; // Extension will advance the step via /api/extension/result
+      }
       await visitProfile(lead.linkedin_url, accountId, lead.id);
       await actionDelay();
       break;
@@ -204,6 +260,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
         const tomorrow = Math.floor(Date.now() / 1000) + 86400;
         db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
           .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
+        return;
+      }
+      if (isExtensionActive(accountId)) {
+        queueExtensionTask(lead, 'follow_profile', { profileUrl: lead.linkedin_url }, accountId);
         return;
       }
       await followProfile(lead.linkedin_url, accountId);
@@ -219,16 +279,19 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
           .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
         return;
       }
-      // Like 1-2 recent posts before connecting — warms up the lead, improves accept rate
-      // Fire-and-forget so we don't block the worker if liking fails or is slow
-      likeRecentPosts(lead.linkedin_url, accountId).catch(err =>
-        logger.warn('likeRecentPosts failed (non-fatal)', { leadId: lead.id, error: String(err) }),
-      );
       let rawNote = step.message_text;
       if (step.ab_test_id && rawNote) {
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
       }
       const note = rawNote ? await renderTemplate(rawNote, lead, website) : undefined;
+      if (isExtensionActive(accountId)) {
+        queueExtensionTask(lead, 'send_connection', { profileUrl: lead.linkedin_url, note: note ?? null }, accountId);
+        return;
+      }
+      // Playwright fallback: like posts then connect
+      likeRecentPosts(lead.linkedin_url, accountId).catch(err =>
+        logger.warn('likeRecentPosts failed (non-fatal)', { leadId: lead.id, error: String(err) }),
+      );
       const sent = await sendConnectionRequest(lead.linkedin_url, note, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -254,6 +317,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
         return;
       }
       const text = await renderTemplate(rawText, lead, website);
+      if (isExtensionActive(accountId)) {
+        queueExtensionTask(lead, 'send_message', { profileUrl: lead.linkedin_url, messageText: text }, accountId);
+        return;
+      }
       const sent = await sendMessage(lead.linkedin_url, text, accountId);
       if (sent) {
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
@@ -310,6 +377,10 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
       break;
     }
     case 'check_connection': {
+      if (isExtensionActive(accountId)) {
+        queueExtensionTask(lead, 'check_connection', { profileUrl: lead.linkedin_url }, accountId);
+        return;
+      }
       const connStatus = await checkConnectionStatus(lead.linkedin_url, accountId);
       if (connStatus === 'connected') {
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wifi, WifiOff, LogIn, Sparkles, Key, Mail, Link2 } from 'lucide-react';
-import { settingsApi, crmApi } from '../lib/api';
+import { Wifi, WifiOff, LogIn, Sparkles, Key, Mail, Link2, Puzzle, Copy, Check } from 'lucide-react';
+import { settingsApi, crmApi, api } from '../lib/api';
 
 interface SettingsData {
   my_name: string | null;
@@ -64,6 +64,8 @@ export function SettingsPage() {
   const [loginMsg, setLoginMsg] = useState('');
   const [crmTestResult, setCrmTestResult] = useState<CrmTestResults | null>(null);
   const [crmTesting, setCrmTesting] = useState(false);
+  const [extensionToken, setExtensionToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -91,6 +93,11 @@ export function SettingsPage() {
       }));
     }
   }, [settings]);
+
+  // Load extension token on mount
+  useEffect(() => {
+    api.get('/extension/token').then(r => setExtensionToken(r.data.extension_token)).catch(() => {});
+  }, []);
 
   const saveMutation = useMutation({
     mutationFn: () => settingsApi.update(form),
@@ -524,6 +531,72 @@ export function SettingsPage() {
         <p className="text-xs text-gray-400 mt-3">
           Limits are dynamically adjusted by account health score (0-100). CAPTCHA −30, warning −20, restriction −50. +5/day when healthy.
         </p>
+      </div>
+
+      {/* Chrome Extension */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Puzzle className="w-5 h-5 text-blue-600" />
+          <h2 className="font-semibold text-gray-900">Chrome Extension</h2>
+          <span className="ml-auto text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">Recommended</span>
+        </div>
+        <p className="text-sm text-gray-600">
+          The Chrome Extension runs automation directly in your browser — just like Dripify.
+          LinkedIn can't detect it because it uses your real session. No session drops.
+        </p>
+
+        {/* Setup steps */}
+        <ol className="text-sm text-gray-700 space-y-2 list-none">
+          {[
+            '1. Download the extension folder and load it in Chrome (chrome://extensions → Load unpacked)',
+            '2. Copy the token below and paste it into the extension popup',
+            '3. Copy the Account ID from the Accounts page and paste it into the extension popup',
+            '4. Click Save & Connect — the extension will show ✅ Connected',
+          ].map((step) => (
+            <li key={step} className="flex gap-2">
+              <span className="text-blue-500 font-bold">→</span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+
+        {/* Token display */}
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Extension Token</label>
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={extensionToken ?? 'Loading…'}
+              className="flex-1 px-3 py-2 text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg text-gray-700 select-all"
+              onFocus={e => e.target.select()}
+            />
+            <button
+              onClick={async () => {
+                if (extensionToken) {
+                  await navigator.clipboard.writeText(extensionToken);
+                  setTokenCopied(true);
+                  setTimeout(() => setTokenCopied(false), 2000);
+                }
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-gray-600"
+              title="Copy token"
+            >
+              {tokenCopied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        <button
+          onClick={async () => {
+            if (confirm('This will invalidate the current token. The extension will need to be reconfigured. Continue?')) {
+              const r = await api.post('/extension/token/regenerate');
+              setExtensionToken(r.data.extension_token);
+            }
+          }}
+          className="text-xs text-red-500 hover:text-red-700 transition-colors"
+        >
+          Regenerate token
+        </button>
       </div>
     </div>
   );

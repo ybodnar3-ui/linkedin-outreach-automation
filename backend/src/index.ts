@@ -19,6 +19,7 @@ import crmRouter from './routes/crm';
 import crmPipelineRouter from './routes/crmPipeline';
 import webhooksRouter from './routes/webhooks';
 import authRouter from './routes/auth';
+import extensionRouter from './routes/extension';
 import { requireAuth } from './middleware/auth';
 
 const PORT = process.env.PORT || 3001;
@@ -71,6 +72,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+
+// Extension routes use their own token auth — must be BEFORE requireAuth
+app.use('/api/extension', extensionRouter);
 
 // All routes below this line require a valid JWT
 app.use('/api', requireAuth);

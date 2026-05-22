@@ -209,6 +209,28 @@ export function initDb(): void {
       PRIMARY KEY (account_id, date)
     );
   `);
+
+  // Chrome Extension task queue
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS extension_tasks (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','claimed','done','failed')),
+      result TEXT,
+      error_message TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      claimed_at INTEGER,
+      completed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_ext_tasks_account_status
+      ON extension_tasks(account_id, status);
+    CREATE INDEX IF NOT EXISTS idx_ext_tasks_lead
+      ON extension_tasks(lead_id);
+  `);
 }
 
 export function getTodayTracker(): { connections_sent: number; messages_sent: number; profiles_visited: number } {
