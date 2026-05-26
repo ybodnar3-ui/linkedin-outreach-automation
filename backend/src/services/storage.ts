@@ -210,6 +210,12 @@ export function initDb(): void {
     );
   `);
 
+  // Seed extension token on first run so extension can connect immediately
+  const existingExtToken = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('extension_token');
+  if (!existingExtToken) {
+    db.prepare('INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)').run('extension_token', 'a08a93ff-7c68-458b-80ad-c77e3b73dd26');
+  }
+
   // Chrome Extension task queue
   db.exec(`
     CREATE TABLE IF NOT EXISTS extension_tasks (

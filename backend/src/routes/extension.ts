@@ -35,8 +35,7 @@ function getOrCreateExtensionToken(): string {
 }
 
 function verifyExtensionToken(req: Request): boolean {
-  const token = getSetting('extension_token');
-  if (!token) return false;
+  const token = getOrCreateExtensionToken(); // seeds default if missing
   const auth = req.headers.authorization;
   return auth === `Bearer ${token}`;
 }
