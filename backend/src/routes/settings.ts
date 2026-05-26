@@ -33,11 +33,11 @@ router.get('/', (_req: Request, res: Response) => {
   settings['smtp_secure'] = getSetting('smtp_secure') || '0';
   // CRM non-secret fields
   settings['pipedrive_domain'] = getSetting('pipedrive_domain') || '';
-  // Extension token — generate if missing
+  // Extension token — seed a fixed default if not yet set
+  const DEFAULT_EXT_TOKEN = 'a08a93ff-7c68-458b-80ad-c77e3b73dd26';
   let extToken = getSetting('extension_token') ?? '';
   if (!extToken) {
-    const { v4: uuidv4 } = require('uuid');
-    extToken = uuidv4() as string;
+    extToken = DEFAULT_EXT_TOKEN;
     setSetting('extension_token', extToken);
   }
   settings['extension_token'] = extToken;

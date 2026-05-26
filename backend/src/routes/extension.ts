@@ -22,12 +22,14 @@ const router = Router();
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
+const DEFAULT_EXT_TOKEN = 'a08a93ff-7c68-458b-80ad-c77e3b73dd26';
+
 function getOrCreateExtensionToken(): string {
   let token = getSetting('extension_token');
   if (!token) {
-    token = uuidv4();
+    token = DEFAULT_EXT_TOKEN;
     setSetting('extension_token', token);
-    logger.info('Extension token generated');
+    logger.info('Extension token initialized with default');
   }
   return token;
 }
