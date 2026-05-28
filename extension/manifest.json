@@ -9,13 +9,19 @@
     "alarms",
     "tabs",
     "scripting",
-    "notifications"
+    "notifications",
+    "webRequest",
+    "cookies"
   ],
 
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://*.railway.app/*",
-    "http://localhost:3001/*"
+    "http://localhost:3001/*",
+    "https://www.bing.com/*",
+    "https://www.google.com/*",
+    "https://html.duckduckgo.com/*",
+    "https://duckduckgo.com/*"
   ],
 
   "background": {
@@ -25,8 +31,14 @@
   "content_scripts": [
     {
       "matches": ["https://www.linkedin.com/*"],
+      "js": ["interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
 

@@ -171,6 +171,66 @@ router.post('/result', (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
+// ── Campaigns list (for popup) ────────────────────────────────────────────────
+
+router.get('/campaigns', (req: Request, res: Response) => {
+  if (!verifyExtensionToken(req)) return res.status(401).json({ error: 'Invalid extension token' });
+  const campaigns = db.prepare(
+    "SELECT id, name FROM campaigns WHERE status IN ('active','draft') ORDER BY created_at DESC",
+  ).all() as Array<{ id: string; name: string }>;
+  return res.json(campaigns);
+});
+
+// ── Import leads from extension scrape ───────────────────────────────────────
+
+router.post('/import-leads', (req: Request, res: Response) => {
+  if (!verifyExtensionToken(req)) return res.status(401).json({ error: 'Invalid extension token' });
+
+  const { campaign_id, leads } = req.body as {
+    campaign_id: string;
+    leads: Array<{
+      linkedin_url: string;
+      first_name?: string;
+      last_name?: string;
+      title?: string;
+      company?: string;
+    }>;
+  };
+
+  if (!campaign_id || !Array.isArray(leads)) {
+    return res.status(400).json({ error: 'campaign_id and leads[] required' });
+  }
+
+  const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(campaign_id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+  const now = Math.floor(Date.now() / 1000);
+  // current_step = 1 to match the first campaign step's step_order (steps start at 1, NOT 0)
+  // next_action_at = now so worker picks it up immediately
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO leads
+      (id, campaign_id, linkedin_url, first_name, last_name, title, company,
+       status, current_step, next_action_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)
+  `);
+
+  let added = 0;
+  let skipped = 0;
+  for (const lead of leads) {
+    if (!lead.linkedin_url?.includes('/in/')) { skipped++; continue; }
+    const ins = insert.run(
+      uuidv4(), campaign_id, lead.linkedin_url,
+      lead.first_name || null, lead.last_name || null,
+      lead.title || null, lead.company || null,
+      now, now, now,
+    );
+    if (ins.changes > 0) { added++; } else { skipped++; }
+  }
+
+  logger.info('Extension lead import', { campaign_id, added, skipped });
+  return res.json({ ok: true, added, skipped });
+});
+
 // ── Token management ──────────────────────────────────────────────────────────
 
 /**

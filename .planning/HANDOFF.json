@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-15T06:36:55.789Z",
+  "timestamp": "2026-05-28T06:43:17.338Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -22,21 +22,45 @@
     },
     {
       "status": "M",
-      "path": "backend/src/routes/campaigns.ts"
+      "path": "backend/src/routes/extension.ts"
     },
     {
       "status": "M",
-      "path": "backend/src/services/storage.ts"
+      "path": "backend/src/utils/delays.ts"
     },
     {
       "status": "M",
-      "path": "backend/src/workers/campaignWorker.ts"
+      "path": "extension/background.js"
     },
     {
       "status": "M",
-      "path": "frontend/src/pages/CampaignBuilderPage.tsx"
+      "path": "extension/content.js"
+    },
+    {
+      "status": "M",
+      "path": "extension/manifest.json"
+    },
+    {
+      "status": "M",
+      "path": "extension/popup.html"
+    },
+    {
+      "status": "M",
+      "path": "extension/popup.js"
+    },
+    {
+      "status": "??",
+      "path": ".DS_Store"
+    },
+    {
+      "status": "??",
+      "path": ".github/"
+    },
+    {
+      "status": "??",
+      "path": "extension/interceptor.js"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\n006ecf0 feat: add free LinkedIn people search scraper\n88e1724 feat: add LinkedIn cookie import flow for remote server\n568afd9 fix: WebSocket mixed content crash on HTTPS (Railway)\n1c87d4a fix: switch to node:20-bookworm-slim + manual playwright install\n62a1b18 fix: TypeScript errors blocking Docker build"
+  "context_notes": "Recent commits:\nfea50f6 fix: seed extension token at DB init so ping works on first request\n92994c7 fix: seed default extension token so extension can connect immediately\n0c25ef7 fix: expose extension_token via settings API for easy retrieval\n6e1aaf8 feat: Chrome Extension for LinkedIn automation (Dripify-style)\nb8e217c fix: rewrite LinkedIn search scraper to be layout-agnostic"
 }

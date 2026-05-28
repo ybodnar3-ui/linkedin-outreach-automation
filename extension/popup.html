@@ -2,66 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LI Outreach</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      width: 300px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 13px;
-      background: #fff;
-      color: #1a1a1a;
-    }
-    .header {
-      background: #0077b5;
-      color: white;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+    body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a; }
+    .header { background: #0077b5; color: white; padding: 12px 16px; display: flex; align-items: center; gap: 8px; }
     .header h1 { font-size: 15px; font-weight: 600; }
     .header .version { font-size: 10px; opacity: 0.7; margin-left: auto; }
-    .body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
     label { font-size: 11px; color: #555; margin-bottom: 3px; display: block; }
-    input {
-      width: 100%;
-      padding: 7px 10px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.2s;
+    input, select, textarea {
+      width: 100%; padding: 7px 10px; border: 1px solid #ddd;
+      border-radius: 6px; font-size: 12px; outline: none;
+      transition: border-color 0.2s; background: #fff;
     }
-    input:focus { border-color: #0077b5; }
+    input:focus, select:focus, textarea:focus { border-color: #0077b5; }
+    textarea { resize: none; height: 52px; font-size: 11px; }
     .field { display: flex; flex-direction: column; }
     button.primary {
-      width: 100%;
-      padding: 9px;
-      background: #0077b5;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
+      width: 100%; padding: 9px; background: #0077b5; color: white;
+      border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background 0.2s;
     }
     button.primary:hover { background: #005f91; }
     button.primary:disabled { background: #aac8df; cursor: not-allowed; }
-    .status {
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      text-align: center;
-      font-weight: 500;
-    }
+    button.primary.green { background: #28a745; }
+    button.primary.green:hover { background: #1e7e34; }
+    .status { padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: center; font-weight: 500; }
     .status.connected   { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .status.disconnected{ background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     .status.loading     { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
     .divider { height: 1px; background: #eee; }
     .hint { font-size: 10px; color: #888; line-height: 1.4; }
+    .section-title { font-size: 11px; font-weight: 700; color: #0077b5; text-transform: uppercase; letter-spacing: 0.5px; }
+    .progress { font-size: 11px; color: #555; text-align: center; padding: 4px 0; min-height: 18px; }
   </style>
 </head>
 <body>
@@ -71,25 +45,96 @@
     <span class="version">v1.0</span>
   </div>
   <div class="body">
+
+    <!-- Connection settings -->
     <div class="field">
       <label>Backend URL</label>
-      <input id="apiUrl" type="url" placeholder="https://your-app.railway.app" />
+      <input id="apiUrl" type="url" placeholder="http://localhost:3001" />
     </div>
     <div class="field">
       <label>Extension Token</label>
-      <input id="apiToken" type="password" placeholder="Paste token from Settings page" />
+      <input id="apiToken" type="password" placeholder="Token from Settings" />
     </div>
     <div class="field">
       <label>Account ID</label>
-      <input id="accountId" placeholder="Paste account ID from Accounts page" />
+      <input id="accountId" placeholder="Account ID from Accounts page" />
     </div>
     <button class="primary" id="saveBtn">Save & Connect</button>
-    <div class="divider"></div>
     <div class="status disconnected" id="statusBox">Not connected</div>
+
+    <div class="divider"></div>
+
+    <!-- Bulk import -->
+    <p class="section-title">📥 Import Leads from Search</p>
+    <div class="field">
+      <label>Campaign</label>
+      <select id="campaignSelect"><option value="">Select campaign...</option></select>
+    </div>
+    <div class="field">
+      <label>LinkedIn Search URL</label>
+      <textarea id="searchUrl" placeholder="Paste LinkedIn people search URL here..."></textarea>
+    </div>
+    <div class="field">
+      <label>Max leads (10 per page)</label>
+      <input id="maxLeads" type="number" value="50" min="10" max="500" step="10" />
+    </div>
+    <button class="primary green" id="importBtn">🚀 Import All Leads (auto-scrape)</button>
+    <div class="progress" id="importProgress"></div>
+    <p class="hint">⚠️ Auto-scrape works only for Sales Navigator. For Free LinkedIn, use Web Search below ↓</p>
+
+    <div class="divider"></div>
+
+    <!-- WEB SEARCH (single query) -->
+    <p class="section-title">🔎 Web Search Import (Single)</p>
+    <div class="field">
+      <label>Keywords (job title, location, industry)</label>
+      <input id="webKeywords" type="text" placeholder='e.g. "salon owner" "new york"' />
+    </div>
+    <div class="field">
+      <label>Max profiles to find</label>
+      <input id="webMaxResults" type="number" value="50" min="10" max="200" step="10" />
+    </div>
+    <button class="primary green" id="webSearchBtn">🔎 Search Web → Add to Campaign</button>
+    <div class="progress" id="webProgress"></div>
+
+    <div class="divider"></div>
+
+    <!-- BATCH WEB SEARCH — для тисяч лідів -->
+    <p class="section-title">🚀 BATCH SEARCH (★ для тисяч лідів)</p>
+    <div class="field">
+      <label>Roles / keywords (one per line)</label>
+      <textarea id="batchKeywords" style="height: 80px;" placeholder="salon owner&#10;hair salon owner&#10;barber shop owner&#10;spa owner&#10;nail salon owner&#10;beauty salon owner"></textarea>
+    </div>
+    <div class="field">
+      <label>Locations (one per line)</label>
+      <textarea id="batchLocations" style="height: 70px;" placeholder="new york&#10;manhattan&#10;brooklyn&#10;queens"></textarea>
+    </div>
+    <div id="batchEstimate" style="font-size: 11px; color: #555; padding: 4px 0;">
+      Estimate: <span id="batchEstQueries">0</span> queries → ~<span id="batchEstLeads">0</span> unique leads (~<span id="batchEstTime">0</span> min)
+    </div>
+    <button class="primary green" id="batchSearchBtn">🚀 Run Batch Search</button>
+    <button class="primary" id="batchStopBtn" style="background: #dc3545; margin-top: 4px; display: none;">⏹ Stop</button>
+    <div class="progress" id="batchProgress"></div>
     <p class="hint">
-      Find the token on your <strong>Settings → Chrome Extension</strong> section.<br/>
-      Find the Account ID on the <strong>Accounts</strong> page.
+      Combines each keyword × each location. 6 roles × 4 locations = 24 queries → ~600-1200 unique leads.
+      Takes ~10 sec per query (active tab briefly opens/closes). Browser will be busy.
     </p>
+
+    <div class="divider"></div>
+
+    <!-- Manual paste — backup method -->
+    <p class="section-title">✏️ Manual Paste (Backup)</p>
+    <div class="field">
+      <label>Profile URLs (one per line)</label>
+      <textarea id="manualUrls" style="height: 100px;" placeholder="https://www.linkedin.com/in/john-doe&#10;https://www.linkedin.com/in/jane-smith&#10;https://www.linkedin.com/in/some-slug&#10;..."></textarea>
+    </div>
+    <button class="primary green" id="manualImportBtn">📋 Add Pasted Leads to Campaign</button>
+    <div class="progress" id="manualProgress"></div>
+    <p class="hint">
+      Find profiles via LinkedIn search, copy their URLs (right-click → Copy link), paste here.
+      Each URL on its own line. Format: <code>linkedin.com/in/SLUG</code>
+    </p>
+
   </div>
   <script src="popup.js"></script>
 </body>

@@ -8,7 +8,94 @@
 
 // ── Message listener ──────────────────────────────────────────────────────────
 
+// ── Receive data from interceptor.js (MAIN world) via window.postMessage ─────
+// postMessage is the only reliable cross-world communication in Chrome extensions.
+
+let _lastVoyagerUrl = null;
+let _lastVoyagerCsrf = null;
+
+window.addEventListener('message', (e) => {
+  // Only accept messages from our interceptor (same origin, has __liOutreach flag)
+  if (!e.data?.__liOutreach) return;
+
+  if (e.data.type === 'LEADS' && Array.isArray(e.data.leads) && e.data.leads.length > 0) {
+    if (e.data.url) {
+      _lastVoyagerUrl = e.data.url;
+      try { sessionStorage.setItem('_liVoyagerUrl', e.data.url); } catch {}
+    }
+    chrome.runtime.sendMessage({
+      type: 'LI_OUTREACH_VOYAGER_LEADS',
+      leads: e.data.leads,
+    }).catch(() => {});
+  }
+});
+
+function extractLeadsFromVoyager(data) {
+  const leads = [];
+  const seen = new Set();
+  const str = JSON.stringify(data);
+
+  // Extract publicIdentifier + firstName + lastName from the JSON blob
+  // LinkedIn's voyager response nests profiles in various places
+  function walk(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+
+    if (obj.publicIdentifier && typeof obj.publicIdentifier === 'string') {
+      const slug = obj.publicIdentifier;
+      if (!seen.has(slug) && slug.length > 2) {
+        seen.add(slug);
+        const firstName = obj.firstName || '';
+        const lastName = obj.lastName || '';
+        const title = obj.headline || '';
+        leads.push({
+          linkedin_url: `https://www.linkedin.com/in/${slug}`,
+          first_name: firstName,
+          last_name: lastName,
+          title,
+          company: '',
+        });
+      }
+    }
+    Object.values(obj).forEach(walk);
+  }
+
+  walk(data);
+  return leads;
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Return the captured Voyager URL so background.js can paginate it
+  if (message.type === 'LI_OUTREACH_GET_VOYAGER_URL') {
+    let url  = _lastVoyagerUrl  || sessionStorage.getItem('_liVoyagerUrl')  || null;
+    let csrf = _lastVoyagerCsrf || sessionStorage.getItem('_liVoyagerCsrf') || null;
+
+    if (!url) {
+      // Fallback: scan ALL browser network requests (even ones before content.js loaded)
+      // performance.getEntriesByType('resource') includes fetch/XHR calls with full URLs
+      try {
+        const entries = performance.getEntriesByType('resource');
+        const entry = entries
+          .filter(e => e.name.includes('/voyager/api/search/blended'))
+          .pop(); // most recent
+        if (entry) {
+          url = entry.name;
+          _lastVoyagerUrl = url;
+          try { sessionStorage.setItem('_liVoyagerUrl', url); } catch {}
+        }
+      } catch {}
+    }
+
+    sendResponse({ url, csrf });
+    return true;
+  }
+
+  if (message.type === 'LI_OUTREACH_SCRAPE_SEARCH') {
+    const leads = scrapeSearchResults();
+    sendResponse({ leads });
+    return true;
+  }
+
   if (message.type !== 'LI_OUTREACH_EXECUTE') return;
 
   executeAction(message.action, message.payload)
@@ -232,6 +319,72 @@ async function sendMessage(messageText) {
   }
 
   return { success: false, error: 'Send button not found in message composer' };
+}
+
+// ── LinkedIn Search Scraper ───────────────────────────────────────────────────
+
+function scrapeSearchResults() {
+  const leads = [];
+  const seen = new Set();
+
+  function addLead(url, firstName, lastName, title, company, location) {
+    const clean = url.split('?')[0].replace(/\/$/, '');
+    if (!clean.match(/linkedin\.com\/in\/[^/]+$/) || seen.has(clean)) return;
+    seen.add(clean);
+    const atIdx = (title || '').indexOf(' at ');
+    const t = atIdx > 0 ? title.slice(0, atIdx).trim() : (title || '');
+    const c = atIdx > 0 ? title.slice(atIdx + 4).trim() : (company || '');
+    leads.push({ linkedin_url: clean, first_name: firstName || '', last_name: lastName || '', title: t, company: c, location: location || '' });
+  }
+
+  // ── Strategy 1: visible <a href="/in/..."> links ───────────────────────────
+  document.querySelectorAll('a[href*="/in/"]').forEach(link => {
+    if (!link.href.match(/linkedin\.com\/in\/[^/]+/)) return;
+    const container = link.closest('li.reusable-search__result-container, li[class*="result"], [data-view-name]');
+    let name = '', rawTitle = '', location = '';
+    if (container) {
+      const nameEl = container.querySelector('.entity-result__title-text a span[aria-hidden="true"]') ||
+                     container.querySelector('.app-aware-link span[aria-hidden="true"]');
+      name = (nameEl?.textContent || link.textContent || '').trim().replace('LinkedIn Member', '').trim();
+      rawTitle = (container.querySelector('.entity-result__primary-subtitle')?.textContent || '').trim();
+      location = (container.querySelector('.entity-result__secondary-subtitle')?.textContent || '').trim();
+    }
+    const parts = name.split(' ').filter(Boolean);
+    addLead(link.href, parts[0], parts.slice(1).join(' '), rawTitle, '', location);
+  });
+
+  // ── Strategy 2: extract from embedded JSON (voyager data in <code> tags) ──
+  document.querySelectorAll('code[id^="bpr-guid"]').forEach(el => {
+    try {
+      const json = JSON.parse(el.textContent || '{}');
+      const str = JSON.stringify(json);
+      // Find all publicIdentifier values (LinkedIn usernames)
+      const matches = str.matchAll(/"publicIdentifier"\s*:\s*"([^"]+)"/g);
+      for (const m of matches) {
+        const slug = m[1];
+        if (!slug || slug.length < 3) continue;
+        addLead(`https://www.linkedin.com/in/${slug}`, '', '', '', '', '');
+      }
+      // Also find firstName/lastName near publicIdentifier
+      const entities = str.matchAll(/"firstName"\s*:\s*"([^"]*)","lastName"\s*:\s*"([^"]*)"/g);
+      for (const m of entities) {
+        // These might not be paired with a URL easily, skip for now
+      }
+    } catch {}
+  });
+
+  // ── Strategy 3: extract from window.__SSR_DATA__ or similar globals ────────
+  try {
+    const pageText = document.documentElement.innerHTML;
+    const slugs = pageText.matchAll(/\/in\/([\w-]{3,100})(?:\/|"|'|\?)/g);
+    for (const m of slugs) {
+      const slug = m[1];
+      if (/^(search|jobs|company|school|groups|learning)$/.test(slug)) continue;
+      addLead(`https://www.linkedin.com/in/${slug}`, '', '', '', '', '');
+    }
+  } catch {}
+
+  return leads;
 }
 
 async function followProfile() {
