@@ -136,10 +136,12 @@ function sleep(ms) {
  * LinkedIn sometimes adds icons inside buttons so we check startsWith.
  */
 function findButton(text) {
-  const btns = Array.from(document.querySelectorAll('button'));
+  const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
   return btns.find(b => {
-    const t = (b.ariaLabel || b.textContent || '').trim();
-    return t === text || t.startsWith(text);
+    const label = (b.getAttribute('aria-label') || b.ariaLabel || '').trim();
+    const textContent = (b.textContent || '').trim();
+    return label === text || label.startsWith(text) ||
+           textContent === text || textContent.startsWith(text);
   }) || null;
 }
 
@@ -197,33 +199,78 @@ async function checkConnection() {
   return { success: true, connection_status: 'unknown' };
 }
 
+/**
+ * Find a button by aria-label or text, with broader matching for LinkedIn's varied button structures.
+ */
+function findConnectButton() {
+  const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+  // First: exact aria-label match for "Connect" or "Invite ... to connect"
+  for (const b of btns) {
+    const label = (b.getAttribute('aria-label') || '').trim();
+    if (label === 'Connect' || /^Connect with /i.test(label) || /^Invite .+ to connect/i.test(label)) {
+      return b;
+    }
+  }
+  // Second: button text starts with "Connect"
+  for (const b of btns) {
+    const text = (b.textContent || '').trim();
+    if (text === 'Connect' || text.startsWith('Connect')) {
+      return b;
+    }
+  }
+  return null;
+}
+
+async function waitForProfileActions(timeoutMs = 10000) {
+  // Wait until at least one action button (Connect / Message / Follow / More) appears
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const hasActions = findConnectButton() ||
+      findButton('Message') ||
+      findButton('Follow') ||
+      findButton('More') ||
+      document.querySelector('[data-control-name="connect"]') ||
+      document.querySelector('.pvs-profile-actions button') ||
+      document.querySelector('.pv-top-card-v2-ctas button');
+    if (hasActions) return true;
+    await sleep(800);
+  }
+  return false;
+}
+
 async function sendConnection(note) {
+  // Wait for LinkedIn profile action buttons to render
+  await waitForProfileActions();
+  await sleep(1000); // extra settle time
+
   // Check if already connected / pending
   if (findButton('Message')) {
     return { success: true, sent: false, reason: 'already_connected' };
   }
-  if (findButton('Pending')) {
+  if (findButton('Pending') || document.querySelector('[aria-label*="Pending"]') || document.body.innerText.includes('Invitation sent')) {
     return { success: true, sent: false, reason: 'already_pending' };
   }
 
-  // Click the Connect button
-  const connectBtn = findButton('Connect');
+  // Click the Connect button (direct or via "More" dropdown)
+  let connectBtn = findConnectButton();
   if (!connectBtn) {
-    // Some profiles have it behind a "More" dropdown
+    // Try behind "More" dropdown
     const moreBtn = findButton('More');
     if (moreBtn) {
       moreBtn.click();
-      await sleep(1000);
+      await sleep(1200);
+      connectBtn = findConnectButton();
     }
-    // Try again
-    const connectBtn2 = findButton('Connect');
-    if (!connectBtn2) {
-      return { success: false, error: 'Connect button not found' };
+    if (!connectBtn) {
+      // Last resort: try data-control-name
+      connectBtn = document.querySelector('[data-control-name="connect"]');
     }
-    connectBtn2.click();
-  } else {
-    connectBtn.click();
+    if (!connectBtn) {
+      const pageSnippet = document.body.innerText.substring(0, 300);
+      return { success: false, error: `Connect button not found. Page snippet: ${pageSnippet}` };
+    }
   }
+  connectBtn.click();
 
   await sleep(1500);
 
