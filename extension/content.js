@@ -333,10 +333,6 @@ async function sendConnection(note) {
 
   // No Connect button found — determine why
   if (!connectBtn) {
-    // Debug: dump first 5 classes from main section to understand page structure
-    const mainEl = document.querySelector('main') || document.querySelector('[role="main"]');
-    const sectionClasses = mainEl ? Array.from(mainEl.querySelectorAll('section')).slice(0,3).map(s => s.className.split(' ').slice(0,3).join('.')).join(' | ') : 'no main';
-    console.log('[LI Outreach] No connect btn found. Sections:', sectionClasses);
     const is2ndOr3rd = /·\s*(2nd|3rd)\b/i.test(bodyText);
     const hasMessage = /\bMessage\b/.test(bodyText);
     // 1st-degree: no degree badge + Message shown = already connected
@@ -373,11 +369,21 @@ async function sendConnection(note) {
     }
   }
 
-  // Helper: find button inside modal (or full doc as fallback)
+  // SAFETY: if no modal appeared, do NOT search the whole document for "Connect"
+  // — the page has background "People you may know" Connect buttons and we'd
+  // send a request to the wrong person. Abort instead.
+  if (!modal) {
+    // Maybe the request was already sent silently
+    if (/Invitation sent|Pending/i.test(document.body.innerText)) {
+      return { success: true, sent: true };
+    }
+    return { success: false, error: 'Connect modal did not appear after clicking Connect' };
+  }
+
+  // Helper: find button STRICTLY inside the modal (never falls back to document)
   function findInModal(text) {
-    const scope = modal || document;
     const lower = text.toLowerCase();
-    for (const el of scope.querySelectorAll('*')) {
+    for (const el of modal.querySelectorAll('*')) {
       const tag = el.tagName.toLowerCase();
       if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') continue;
       const label = (el.getAttribute('aria-label') || '').toLowerCase();
@@ -411,9 +417,11 @@ async function sendConnection(note) {
     if (addNoteBtn) {
       addNoteBtn.click();
       await sleep(1200);
-      const textarea = document.querySelector('textarea') ||
-                       document.querySelector('#custom-message') ||
-                       document.querySelector('[contenteditable="true"]');
+      // Scope textarea lookup to the modal — avoid picking a stray textarea elsewhere
+      const textarea = modal.querySelector('textarea') ||
+                       modal.querySelector('#custom-message') ||
+                       modal.querySelector('[contenteditable="true"]') ||
+                       document.querySelector('[role="dialog"] textarea');
       if (textarea) {
         textarea.focus();
         if (textarea.tagName === 'TEXTAREA' || textarea.tagName === 'INPUT') {
@@ -440,20 +448,20 @@ async function sendConnection(note) {
     }
   }
 
-  // Step 4: Try any Send variant
+  // Step 4: Try any Send variant — strictly inside the modal
   await sleep(500);
   const sendBtn = findInModal('Send invitation') ||
                   findInModal('Send') ||
-                  document.querySelector('button[aria-label*="Send"i]') ||
-                  document.querySelector('button[type="submit"]');
+                  modal.querySelector('button[aria-label*="Send"i]') ||
+                  modal.querySelector('button[type="submit"]');
   if (sendBtn && !sendBtn.disabled) {
     sendBtn.click();
     await sleep(1500);
     return { success: true, sent: true };
   }
 
-  // Final fallback: log button labels only (no raw body text — avoid PII)
-  const visibleBtns = Array.from(document.querySelectorAll('button, [role="button"]'))
+  // Final fallback: log modal button labels only (no raw body text — avoid PII)
+  const visibleBtns = Array.from(modal.querySelectorAll('button, [role="button"]'))
     .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
     .filter(t => t.length > 0 && t.length < 40)
     .slice(0, 20)

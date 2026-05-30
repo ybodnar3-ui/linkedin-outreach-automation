@@ -239,8 +239,14 @@ async function processTask(task, apiUrl, apiToken) {
       await reportResult(apiUrl, apiToken, task.id, 'done', result, null);
       console.log('[LI Outreach] Task done:', task.action, result);
     } else {
-      await reportResult(apiUrl, apiToken, task.id, 'failed', null, result.error || 'Unknown error');
-      console.warn('[LI Outreach] Task failed:', task.action, result.error);
+      // Pass the full result through (preserves the `warning` flag) so the
+      // backend can pause the campaign on CAPTCHA / restriction.
+      await reportResult(apiUrl, apiToken, task.id, 'failed', result, result.error || 'Unknown error');
+      if (result.warning) {
+        console.error('[LI Outreach] ⚠️ LinkedIn warning — stopping:', result.error);
+      } else {
+        console.warn('[LI Outreach] Task failed:', task.action, result.error);
+      }
     }
   } catch (e) {
     console.error('[LI Outreach] Task error:', e.message);

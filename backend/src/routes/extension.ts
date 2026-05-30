@@ -185,10 +185,28 @@ router.post('/result', (req: Request, res: Response) => {
   if (status === 'done') {
     handleTaskSuccess(task, result || {}, now);
   } else {
-    // On failure: retry in 1 hour
-    db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
-      .run(now + 3600, 'pending', now, task.lead_id);
-    logger.warn('Extension task failed — lead retry in 1h', { taskId: task_id, error: error_message });
+    // Detect LinkedIn safety warnings (CAPTCHA / restriction / checkpoint / weekly limit).
+    // These mean we MUST stop — continuing would get the account banned.
+    const isWarning = (result as { warning?: boolean } | undefined)?.warning === true ||
+      /LinkedIn warning:|captcha|account_restricted|checkpoint|weekly_invite_limit|authwall/i.test(error_message || '');
+
+    if (isWarning) {
+      // Pause the campaign this lead belongs to and alert via WebSocket
+      const lead = db.prepare('SELECT campaign_id FROM leads WHERE id = ?').get(task.lead_id) as { campaign_id?: string } | undefined;
+      if (lead?.campaign_id) {
+        db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE id = ?").run(now, lead.campaign_id);
+      }
+      // Keep the lead pending but defer 24h so we don't immediately retry the warning
+      db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
+        .run(now + 86400, 'pending', now, task.lead_id);
+      logger.error('LinkedIn safety warning — campaign paused', { taskId: task_id, leadId: task.lead_id, campaignId: lead?.campaign_id, error: error_message });
+      broadcastLog('warning', { warningType: error_message, leadId: task.lead_id, campaignId: lead?.campaign_id, message: 'Campaign paused due to LinkedIn safety warning' });
+    } else {
+      // Normal failure: retry in 1 hour
+      db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
+        .run(now + 3600, 'pending', now, task.lead_id);
+      logger.warn('Extension task failed — lead retry in 1h', { taskId: task_id, error: error_message });
+    }
   }
 
   return res.json({ ok: true });
