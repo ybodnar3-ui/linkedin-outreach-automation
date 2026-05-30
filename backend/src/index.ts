@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
@@ -26,11 +27,39 @@ import { requireAuth } from './middleware/auth';
 const PORT = process.env.PORT || 3001;
 
 const app = express();
-app.use(cors());
+
+// CORS: allow the configured frontend + any localhost port (dev dashboard runs
+// on a dynamic Vite port). Reject other origins. Requests with no Origin header
+// (curl, same-origin, the Chrome extension's privileged fetch) are allowed.
+const FRONTEND_URL = process.env.FRONTEND_URL;
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (FRONTEND_URL && origin === FRONTEND_URL) return cb(null, true);
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+}));
 app.use(express.json({ limit: '256kb' }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+
+// Reject unauthenticated WebSocket upgrades during the handshake (before the
+// socket ever opens). The live log stream contains lead PII.
+const wss = new WebSocketServer({
+  server,
+  verifyClient: (info, done) => {
+    try {
+      const url = new URL(info.req.url || '', 'http://localhost');
+      const token = url.searchParams.get('token') || '';
+      jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-change-in-production');
+      done(true);
+    } catch {
+      logger.warn('WebSocket upgrade rejected — invalid/missing token');
+      done(false, 401, 'Unauthorized');
+    }
+  },
+});
 
 export function broadcastLog(event: string, data: unknown): void {
   const message = JSON.stringify({ event, data, ts: Date.now() });
@@ -46,6 +75,7 @@ export function broadcastLog(event: string, data: unknown): void {
 }
 
 wss.on('connection', (ws) => {
+  // Auth already enforced in verifyClient during the upgrade handshake.
   logger.info('WebSocket client connected');
   ws.on('error', (err) => {
     logger.warn('WebSocket client error', { error: String(err) });

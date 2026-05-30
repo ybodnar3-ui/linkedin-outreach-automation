@@ -18,7 +18,9 @@ class WsClient {
       const isDev = window.location.hostname === 'localhost';
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = isDev ? 'localhost:3001' : window.location.host;
-      const url = `${protocol}//${host}`;
+      // Authenticate the WS with the same JWT used for the REST API
+      const token = localStorage.getItem('auth_token') || '';
+      const url = `${protocol}//${host}/?token=${encodeURIComponent(token)}`;
 
       this.ws = new WebSocket(url);
 

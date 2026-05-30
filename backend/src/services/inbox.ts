@@ -125,9 +125,12 @@ async function scrapeThread(accountId: string, threadId: string, page: Page): Pr
   const newInboundIds: Array<{ id: string; text: string }> = [];
 
   for (const msg of messages) {
+    // Include text in the dedup key — two messages in the same thread can share
+    // direction + second-resolution timestamp during rapid exchanges, and would
+    // otherwise be wrongly collapsed into one.
     const existing = db.prepare(
-      'SELECT id FROM inbox_messages WHERE thread_id = ? AND direction = ? AND timestamp = ?'
-    ).get(threadId, msg.direction, msg.timestamp);
+      'SELECT id FROM inbox_messages WHERE thread_id = ? AND direction = ? AND timestamp = ? AND text = ?'
+    ).get(threadId, msg.direction, msg.timestamp, msg.text);
 
     if (!existing) {
       const newId = uuidv4();
