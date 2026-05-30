@@ -15,6 +15,13 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 function addColumnIfNotExists(table: string, column: string, definition: string): void {
+  // SQLite cannot parameterize identifiers, so validate them strictly.
+  // Only simple [a-zA-Z_] names are allowed — prevents SQL injection if a
+  // future caller ever passes non-literal input.
+  const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  if (!IDENT.test(table) || !IDENT.test(column)) {
+    throw new Error(`Invalid identifier in addColumnIfNotExists: table=${table} column=${column}`);
+  }
   const cols = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
   if (!cols.find(c => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
