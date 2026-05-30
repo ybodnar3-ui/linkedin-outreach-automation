@@ -12,14 +12,21 @@ class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   connect() {
+    // Don't attempt to connect while logged out — the server rejects the
+    // upgrade (401) and we'd just hammer it. Re-check periodically until a
+    // token appears (e.g. after login).
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+      return;
+    }
+
     try {
       // In dev the frontend runs on :5173 but WS is on :3001
       // In production everything is on the same host/port (Railway)
       const isDev = window.location.hostname === 'localhost';
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = isDev ? 'localhost:3001' : window.location.host;
-      // Authenticate the WS with the same JWT used for the REST API
-      const token = localStorage.getItem('auth_token') || '';
       const url = `${protocol}//${host}/?token=${encodeURIComponent(token)}`;
 
       this.ws = new WebSocket(url);
@@ -31,9 +38,11 @@ class WsClient {
         } catch { /* ignore malformed messages */ }
       };
 
-      this.ws.onclose = () => {
-        // Reconnect after 5 seconds
-        this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+      this.ws.onclose = (e) => {
+        // 1008 = server rejected the upgrade (bad/expired token). Back off hard
+        // and only retry once a (new) token is present, instead of tight-looping.
+        const delay = e.code === 1008 ? 30000 : 5000;
+        this.reconnectTimer = setTimeout(() => this.connect(), delay);
       };
 
       this.ws.onerror = () => {
