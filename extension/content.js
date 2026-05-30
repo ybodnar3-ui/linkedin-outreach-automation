@@ -343,8 +343,13 @@ async function sendConnection(note) {
     if (hasMessage && !is2ndOr3rd) {
       return { success: true, sent: false, reason: 'already_connected' };
     }
-    const snippet = bodyText.substring(0, 400);
-    return { success: false, error: `Connect button not found. Page snippet: ${snippet}` };
+    // Return button labels only — avoid logging raw page body (contains PII)
+    const btnsFound = Array.from(document.querySelectorAll('button, [role="button"], a.artdeco-button'))
+      .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
+      .filter(t => t.length > 0 && t.length < 40)
+      .slice(0, 20)
+      .join(' | ');
+    return { success: false, error: `Connect button not found. Buttons: ${btnsFound}` };
   }
 
   // Click the Connect button
@@ -447,12 +452,13 @@ async function sendConnection(note) {
     return { success: true, sent: true };
   }
 
-  // Final fallback: dump ALL buttons on page for debugging
+  // Final fallback: log button labels only (no raw body text — avoid PII)
   const visibleBtns = Array.from(document.querySelectorAll('button, [role="button"]'))
-    .map(b => (b.innerText || b.getAttribute('aria-label') || '').trim())
-    .filter(t => t.length > 0)
+    .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
+    .filter(t => t.length > 0 && t.length < 40)
+    .slice(0, 20)
     .join(' | ');
-  return { success: false, error: `Send button not found. Visible buttons: ${visibleBtns.substring(0, 300)}` };
+  return { success: false, error: `Send button not found. Modal buttons: ${visibleBtns}` };
 }
 
 // Like findButton but allows startsWith match (for multi-word Send labels)
