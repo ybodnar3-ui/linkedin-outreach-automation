@@ -168,7 +168,7 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
       return false;
     }
     case 'if_not_replied':
-      return lead.connected_at != null;
+      return lead.replied_at == null; // execute only if lead has NOT replied yet
     default:
       return true;
   }

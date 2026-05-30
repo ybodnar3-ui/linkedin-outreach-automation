@@ -417,10 +417,18 @@ async function sendConnection(note) {
           textarea.dispatchEvent(new Event('input', { bubbles: true }));
           textarea.dispatchEvent(new Event('change', { bubbles: true }));
         } else {
-          // contenteditable div — .value is a no-op, must use execCommand or textContent
-          textarea.textContent = '';
+          // contenteditable div — use clipboard-style insertion (works in Chrome extensions)
           textarea.focus();
-          document.execCommand('insertText', false, note);
+          textarea.textContent = '';
+          // Try modern approach first, fall back to deprecated execCommand
+          try {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', note);
+            textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+          } catch {
+            // eslint-disable-next-line no-restricted-globals
+            document.execCommand('insertText', false, note);
+          }
         }
         await sleep(600);
       }

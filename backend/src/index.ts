@@ -123,6 +123,16 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 initDb();
 logger.info('Database initialized');
 
+// Startup recovery: reset tasks that were mid-flight when server last died.
+// "claimed" = extension had the task but never reported back (crash/sleep).
+// Reset to "pending" so the worker can re-queue them on the next cycle.
+const recoveredTasks = db.prepare(
+  "UPDATE extension_tasks SET status = 'pending', claimed_at = NULL WHERE status = 'claimed'"
+).run();
+if (recoveredTasks.changes > 0) {
+  logger.warn('Startup recovery: reset claimed tasks to pending', { count: recoveredTasks.changes });
+}
+
 // Start campaign worker after DB init
 import('./workers/campaignWorker').then(({ startWorker }) => {
   startWorker();
