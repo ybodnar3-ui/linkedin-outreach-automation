@@ -1,5 +1,10 @@
 import { getTodayTracker } from '../services/storage';
 
+// Working hours — gated on NODE_ENV to prevent 24/7 in production (LinkedIn ban risk)
+const isProd = process.env.NODE_ENV === 'production';
+const WORKING_HOURS: { start: number; end: number } = isProd ? { start: 9, end: 18 } : { start: 0, end: 24 };
+const WORKING_DAYS: readonly number[] = isProd ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6];
+
 // Safe LinkedIn limits 2026
 // NEVER increase connectionRequestsPerDay above 20 without testing on a fresh account
 export const SAFE_LIMITS = {
@@ -12,14 +17,8 @@ export const SAFE_LIMITS = {
   betweenLeads: { min: 60_000, max: 180_000 },
   betweenSessions: { min: 3_600_000, max: 7_200_000 },
 
-  // Working hours — gate on NODE_ENV so production never runs 24/7
-  // In development/testing: 24/7. In production: Mon-Fri 9-18 (account timezone)
-  workingHours: process.env.NODE_ENV === 'production'
-    ? { start: 9, end: 18 }
-    : { start: 0, end: 24 },
-  workingDays: (process.env.NODE_ENV === 'production'
-    ? [1, 2, 3, 4, 5]
-    : [0, 1, 2, 3, 4, 5, 6]) as unknown as readonly number[],
+  workingHours: WORKING_HOURS,
+  workingDays: WORKING_DAYS,
 } as const;
 
 export function isWithinWorkingHours(timezone = 'America/New_York'): boolean {

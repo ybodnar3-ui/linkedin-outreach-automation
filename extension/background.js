@@ -14,6 +14,17 @@
 
 'use strict';
 
+// ── Security helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Validate that a backend URL is a safe localhost address.
+ * Prevents SSRF attacks via crafted popup messages.
+ */
+function isSafeApiUrl(url) {
+  return typeof url === 'string' &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(url);
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let isProcessing = false;
@@ -34,7 +45,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
       const entry = _voyagerByTab.get(details.tabId) || { url: null, csrfToken: null, resolvers: [] };
       entry.csrfToken = csrfHeader.value;
       _voyagerByTab.set(details.tabId, entry);
-      console.log('[LI Outreach] Captured CSRF token:', csrfHeader.value.substring(0, 20) + '…');
+      console.log('[LI Outreach] Captured CSRF token: [REDACTED]');
     }
   },
   { urls: ['https://www.linkedin.com/voyager/api/*'] },
@@ -92,6 +103,7 @@ async function getConfig() {
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 async function apiFetch(apiUrl, apiToken, path, options = {}) {
+  if (!isSafeApiUrl(apiUrl)) throw new Error(`Unsafe apiUrl blocked: ${apiUrl}`);
   const url = `${apiUrl}${path}`;
   const res = await fetch(url, {
     ...options,
@@ -1296,9 +1308,7 @@ async function pushBatchToBackend(allLeadsArray, campaignId, accountId, apiUrl, 
 // Batch message handlers
 chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
   if (message.type === 'LI_OUTREACH_BATCH_START') {
-    // Validate apiUrl to prevent SSRF — only allow http(s)://localhost or configured backend
-    const urlOk = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(message.apiUrl || '');
-    if (!urlOk) {
+    if (!isSafeApiUrl(message.apiUrl)) {
       console.error('[Batch] Rejected unsafe apiUrl:', message.apiUrl);
       chrome.runtime.sendMessage({ type: 'LI_OUTREACH_BATCH_PROGRESS', text: '❌ Invalid backend URL', done: true }).catch(() => {});
       return;
@@ -1440,6 +1450,7 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
 
     chrome.storage.local.get(['autoCaptureCampaign', 'apiUrl', 'apiToken', 'accountId'], (cfg) => {
       if (!cfg.autoCaptureCampaign || !cfg.apiUrl || !cfg.apiToken) return;
+      if (!isSafeApiUrl(cfg.apiUrl)) return;
 
       fetch(`${cfg.apiUrl}/api/extension/import-leads`, {
         method: 'POST',
