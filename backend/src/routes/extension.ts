@@ -20,6 +20,10 @@ import { syncLeadToCrm } from '../services/crmSync';
 
 const router = Router();
 
+// Strict LinkedIn profile URL — same pattern enforced by CSV/manual import.
+// Prevents storing arbitrary URLs the worker would later navigate to (SSRF).
+const LINKEDIN_URL_PATTERN = /^https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+(\/)?$/i;
+
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 function getOrCreateExtensionToken(): string {
@@ -262,7 +266,7 @@ router.post('/import-leads', (req: Request, res: Response) => {
   let added = 0;
   let skipped = 0;
   for (const lead of leads) {
-    if (!lead.linkedin_url?.includes('/in/')) { skipped++; continue; }
+    if (!lead.linkedin_url || !LINKEDIN_URL_PATTERN.test(lead.linkedin_url)) { skipped++; continue; }
     const ins = insert.run(
       uuidv4(), campaign_id, lead.linkedin_url,
       lead.first_name || null, lead.last_name || null,
