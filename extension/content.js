@@ -108,7 +108,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ── Action dispatcher ─────────────────────────────────────────────────────────
 
 async function executeAction(action, payload) {
-  console.log('[LI Outreach] Executing action:', action);
+  console.log('[LI Outreach] Executing action:', action, payload);
+
+  // Safety check: detect LinkedIn security/CAPTCHA screens before doing anything
+  const warning = detectPageWarning();
+  if (warning) {
+    console.warn('[LI Outreach] Page warning detected — aborting action:', warning);
+    return { success: false, error: `LinkedIn warning: ${warning}`, warning: true };
+  }
+
   try {
     switch (action) {
       case 'visit_profile':    return await visitProfile();
@@ -123,6 +131,23 @@ async function executeAction(action, payload) {
     console.error('[LI Outreach] Action error:', err);
     return { success: false, error: err.message };
   }
+}
+
+/**
+ * Detects LinkedIn security/CAPTCHA/restriction warnings.
+ * Returns a warning string if found, null if page is clean.
+ */
+function detectPageWarning() {
+  const url = window.location.href;
+  if (url.includes('/checkpoint/')) return 'checkpoint_page';
+  if (url.includes('/authwall'))    return 'authwall';
+
+  const bodyText = document.body.innerText || '';
+  if (bodyText.includes("Let's do a quick security check")) return 'captcha';
+  if (bodyText.includes("Your account has been restricted"))  return 'account_restricted';
+  if (bodyText.includes("You've reached the weekly invitation limit")) return 'weekly_invite_limit';
+  if (bodyText.includes("you might be experiencing an issue")) return 'possible_issue';
+  return null;
 }
 
 // ── Utility helpers ───────────────────────────────────────────────────────────
@@ -386,9 +411,17 @@ async function sendConnection(note) {
                        document.querySelector('[contenteditable="true"]');
       if (textarea) {
         textarea.focus();
-        textarea.value = note;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        if (textarea.tagName === 'TEXTAREA' || textarea.tagName === 'INPUT') {
+          // Real textarea — set value directly
+          textarea.value = note;
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          // contenteditable div — .value is a no-op, must use execCommand or textContent
+          textarea.textContent = '';
+          textarea.focus();
+          document.execCommand('insertText', false, note);
+        }
         await sleep(600);
       }
     }

@@ -10,3 +10,4 @@ data/logs/
 !.env.example
 backend/public/
 .claude/worktrees/
+backend/.env

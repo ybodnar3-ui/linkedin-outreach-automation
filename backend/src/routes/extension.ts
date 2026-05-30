@@ -22,14 +22,13 @@ const router = Router();
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
-const DEFAULT_EXT_TOKEN = 'a08a93ff-7c68-458b-80ad-c77e3b73dd26';
-
 function getOrCreateExtensionToken(): string {
   let token = getSetting('extension_token');
   if (!token) {
-    token = DEFAULT_EXT_TOKEN;
+    // Generate a fresh random token — never hardcode a default
+    token = uuidv4();
     setSetting('extension_token', token);
-    logger.info('Extension token initialized with default');
+    logger.info('Extension token generated (first run)');
   }
   return token;
 }
@@ -240,19 +239,32 @@ router.post('/import-leads', (req: Request, res: Response) => {
  * the endpoint is mounted BEFORE requireAuth in index.ts so we do our own check.
  */
 router.get('/token', (req: Request, res: Response) => {
-  // Allow access with JWT (same as frontend) — header Bearer <jwt>
-  // We can't easily reuse requireAuth here without restructuring, so we
-  // accept any request that has an Authorization header (frontend sends it).
-  // The endpoint is only useful when the user is already logged into the dashboard.
+  // Requires valid JWT — same auth as the rest of /api
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const jwt = require('jsonwebtoken');
+    jwt.verify(auth.slice(7), process.env.JWT_SECRET || 'dev-secret-change-in-production');
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
   const token = getOrCreateExtensionToken();
   return res.json({ extension_token: token });
 });
 
 /**
  * POST /api/extension/token/regenerate
- * Creates a new extension token (invalidates the old one).
+ * Creates a new extension token. Requires JWT auth.
  */
-router.post('/token/regenerate', (_req: Request, res: Response) => {
+router.post('/token/regenerate', (req: Request, res: Response) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const jwt = require('jsonwebtoken');
+    jwt.verify(auth.slice(7), process.env.JWT_SECRET || 'dev-secret-change-in-production');
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
   const token = uuidv4();
   setSetting('extension_token', token);
   logger.info('Extension token regenerated');

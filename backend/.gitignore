@@ -1,0 +1,18 @@
+# Environment variables — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+node_modules/
+
+# SQLite database (contains real user data)
+../data/*.sqlite
+../data/*.sqlite-shm
+../data/*.sqlite-wal
+../data/sessions/
+
+# Logs
+../logs/
+*.log
