@@ -187,8 +187,12 @@ router.post('/result', (req: Request, res: Response) => {
   } else {
     // Detect LinkedIn safety warnings (CAPTCHA / restriction / checkpoint / weekly limit).
     // These mean we MUST stop — continuing would get the account banned.
+    // Use ONLY reliable signals: the explicit warning flag, or the exact sentinel
+    // prefix that content.js emits ("LinkedIn warning: <type>"). Avoid loose word
+    // matching — error_message contains free-form page text (button labels) that
+    // could otherwise trigger a false-positive pause.
     const isWarning = (result as { warning?: boolean } | undefined)?.warning === true ||
-      /LinkedIn warning:|captcha|account_restricted|checkpoint|weekly_invite_limit|authwall/i.test(error_message || '');
+      (error_message ?? '').startsWith('LinkedIn warning:');
 
     if (isWarning) {
       // Pause the campaign this lead belongs to and alert via WebSocket
