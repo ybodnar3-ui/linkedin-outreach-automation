@@ -32,8 +32,12 @@ router.post('/', (req: Request, res: Response) => {
   if (invalid.length) {
     return res.status(400).json({ error: `Unknown events: ${invalid.join(', ')}` });
   }
-  const wh = createWebhook(url, events as WebhookEvent[], secret);
-  return res.status(201).json(wh);
+  try {
+    const wh = createWebhook(url, events as WebhookEvent[], secret);
+    return res.status(201).json(wh);
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to create webhook' });
+  }
 });
 
 // DELETE /api/webhooks/:id

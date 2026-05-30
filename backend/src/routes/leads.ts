@@ -11,7 +11,10 @@ import { scrapeLinkedInSearch } from '../services/linkedinScraper';
 import { getAccount } from '../services/accounts';
 
 const router = Router();
-const upload = multer({ dest: '../data/uploads/' });
+// Cap upload size to protect memory; reject oversized files at the multer layer
+const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_CSV_ROWS = 5000;
+const upload = multer({ dest: '../data/uploads/', limits: { fileSize: MAX_CSV_BYTES } });
 
 const LINKEDIN_URL_PATTERN = /^https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+(\/)?$/i;
 
@@ -155,22 +158,45 @@ router.post('/import/csv', upload.single('file'), async (req: Request, res: Resp
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
   const results: Array<Record<string, string>> = [];
-  await new Promise<void>((resolve, reject) => {
-    fs.createReadStream(req.file!.path)
-      .pipe(csv())
-      .on('data', (data: Record<string, string>) => results.push(data))
-      .on('end', resolve)
-      .on('error', reject);
-  });
-
-  fs.unlinkSync(req.file.path);
+  let rowLimitHit = false;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const stream = fs.createReadStream(req.file!.path).pipe(csv());
+      stream
+        .on('data', (data: Record<string, string>) => {
+          if (results.length >= MAX_CSV_ROWS) {
+            rowLimitHit = true;
+            stream.destroy();
+            resolve();
+            return;
+          }
+          results.push(data);
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
+  } catch (err) {
+    logger.error('CSV parse failed', { error: err instanceof Error ? err.message : String(err) });
+    fs.promises.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: 'Failed to parse CSV file' });
+  } finally {
+    // Always clean up the temp upload, even on error
+    fs.promises.unlink(req.file.path).catch(() => {});
+  }
 
   let added = 0, skipped = 0;
   const errors: string[] = [];
   const errorDetails: Array<{ row: number; url: string; reason: string }> = [];
 
   const now = Math.floor(Date.now() / 1000);
-  const insertLead = db.prepare('INSERT OR IGNORE INTO leads (id, campaign_id, linkedin_url, first_name, last_name, company, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  // current_step = 1 to match the first campaign step (step_order starts at 1, NOT 0);
+  // next_action_at = now so the worker picks the lead up on the next cycle
+  const insertLead = db.prepare(
+    `INSERT OR IGNORE INTO leads
+       (id, campaign_id, linkedin_url, first_name, last_name, company, title,
+        status, current_step, next_action_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)`,
+  );
 
   results.forEach((row, i) => {
     const url = row.linkedin_url || row.url || row.LinkedIn || row.profile_url || '';
@@ -190,14 +216,14 @@ router.post('/import/csv', upload.single('file'), async (req: Request, res: Resp
       uuidv4(), campaign_id, url.trim(),
       row.first_name || null, row.last_name || null,
       row.company || null, row.title || null,
-      now, now
+      now, now, now
     );
 
     if (result.changes > 0) { added++; } else { skipped++; }
   });
 
-  logger.info('CSV import complete', { campaign_id, added, skipped, errors: errors.length });
-  return res.json({ added, skipped, errors: errors.length, errorDetails });
+  logger.info('CSV import complete', { campaign_id, added, skipped, errors: errors.length, rowLimitHit });
+  return res.json({ added, skipped, errors: errors.length, errorDetails, rowLimitHit });
 });
 
 // POST /api/leads/import-sales-nav — scrape leads from Sales Navigator search URL

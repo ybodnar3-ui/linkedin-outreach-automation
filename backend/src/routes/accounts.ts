@@ -141,7 +141,8 @@ router.post('/:id/import-cookies', async (req: Request, res: Response) => {
     }
   } catch (err) {
     logger.error('Failed to import cookies', { accountId: req.params.id, error: String(err) });
-    return res.status(500).json({ error: 'Failed to save cookies: ' + String(err) });
+    // Don't leak internal error/stack to the client
+    return res.status(500).json({ error: 'Failed to save cookies' });
   }
 });
 

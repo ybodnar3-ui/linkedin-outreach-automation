@@ -21,6 +21,36 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from './storage';
 import { logger } from '../utils/logger';
 
+/**
+ * SSRF guard: reject webhook URLs that target internal/private networks.
+ * Only public https:// (or http:// for explicit non-local hosts) is allowed.
+ */
+export function isSafeWebhookUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+
+  const host = u.hostname.toLowerCase();
+  // Block obvious local names
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+
+  // Block private / loopback / link-local IP ranges
+  const privatePatterns = [
+    /^127\./, /^10\./, /^192\.168\./, /^169\.254\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,      // 172.16-31.x
+    /^0\./, /^::1$/, /^fe80:/i, /^fc00:/i, /^fd00:/i,
+  ];
+  if (privatePatterns.some(re => re.test(host))) return false;
+  // Cloud metadata endpoint
+  if (host === '169.254.169.254') return false;
+
+  return true;
+}
+
 export interface Webhook {
   id: string;
   url: string;
@@ -80,6 +110,12 @@ export async function fireWebhookEvent(event: WebhookEvent, data: Record<string,
         headers['X-Webhook-Signature'] = sign(wh.secret, payload);
       }
 
+      // Skip any URL that fails the SSRF check (covers legacy rows in DB)
+      if (!isSafeWebhookUrl(wh.url)) {
+        logger.warn('Webhook skipped — unsafe URL', { event, url: wh.url });
+        return;
+      }
+
       try {
         const res = await fetch(wh.url, {
           method: 'POST',
@@ -102,6 +138,9 @@ export function listWebhooks(): Webhook[] {
 }
 
 export function createWebhook(url: string, events: WebhookEvent[], secret?: string): Webhook {
+  if (!isSafeWebhookUrl(url)) {
+    throw new Error('Webhook URL must be a public http(s) address (private/internal hosts are not allowed)');
+  }
   const id = uuidv4();
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`

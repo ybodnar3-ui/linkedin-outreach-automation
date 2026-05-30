@@ -5,6 +5,30 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
+// Allowed enum values for campaign steps — reject anything else so the worker's
+// step dispatcher never receives an unknown action/condition.
+const VALID_ACTIONS = ['visit_profile', 'send_connection', 'send_message', 'send_inmail', 'send_email', 'follow_profile', 'check_connection', 'wait', 'visit', 'connect', 'message'];
+const VALID_CONDITIONS = ['always', 'if_connected', 'if_not_replied'];
+
+/**
+ * Validate a steps array. Returns an error string if invalid, or null if OK.
+ */
+function validateSteps(steps: unknown): string | null {
+  if (!Array.isArray(steps)) return 'steps must be an array';
+  for (const s of steps as Array<Record<string, unknown>>) {
+    if (typeof s.action !== 'string' || !VALID_ACTIONS.includes(s.action)) {
+      return `invalid step action: ${String(s.action)}`;
+    }
+    if (s.condition != null && !VALID_CONDITIONS.includes(s.condition as string)) {
+      return `invalid step condition: ${String(s.condition)}`;
+    }
+    if (typeof s.step_order !== 'number' || s.step_order < 1) {
+      return `invalid step_order: ${String(s.step_order)}`;
+    }
+  }
+  return null;
+}
+
 router.get('/', (_req: Request, res: Response) => {
   const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();
   res.json(campaigns);
@@ -20,6 +44,11 @@ router.get('/:id', (req: Request, res: Response) => {
 router.post('/', (req: Request, res: Response) => {
   const { name, timezone = 'America/New_York', website = null, steps = [] } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
+
+  if (steps.length > 0) {
+    const stepErr = validateSteps(steps);
+    if (stepErr) return res.status(400).json({ error: stepErr });
+  }
 
   const id = uuidv4();
   const now = Math.floor(Date.now() / 1000);
@@ -51,6 +80,8 @@ router.put('/:id', (req: Request, res: Response) => {
 
   // Re-sync steps if provided — delete all old ones, insert the new set
   if (Array.isArray(steps)) {
+    const stepErr = validateSteps(steps);
+    if (stepErr) return res.status(400).json({ error: stepErr });
     db.prepare('DELETE FROM campaign_steps WHERE campaign_id = ?').run(req.params.id);
     const insertStep = db.prepare(
       'INSERT INTO campaign_steps (id, campaign_id, step_order, action, wait_days, condition, message_text, email_subject) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
