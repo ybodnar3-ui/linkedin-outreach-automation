@@ -165,7 +165,6 @@ async function getOrCreateLinkedInTab() {
 
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 30000);
     function listener(id, changeInfo) {
       if (id === tabId && changeInfo.status === 'complete') {
         clearTimeout(timeout);
@@ -173,6 +172,11 @@ function waitForTabLoad(tabId) {
         resolve();
       }
     }
+    // Always remove listener on timeout to prevent memory leak
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 30000);
     chrome.tabs.onUpdated.addListener(listener);
   });
 }

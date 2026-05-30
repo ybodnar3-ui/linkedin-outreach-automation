@@ -85,13 +85,26 @@ router.get('/poll', (req: Request, res: Response) => {
   const accountId = req.query.account_id as string;
   if (!accountId) return res.status(400).json({ error: 'account_id required' });
 
-  // Expire stale claimed tasks (> 30 min)
-  const staleThreshold = Math.floor(Date.now() / 1000) - 1800;
+  // Expire stale claimed tasks (> 30 min) and immediately unblock their leads
+  const now = Math.floor(Date.now() / 1000);
+  const staleThreshold = now - 1800;
+
+  // Get stale task lead IDs before updating
+  const staleLeadIds = (db.prepare(
+    "SELECT lead_id FROM extension_tasks WHERE status = 'claimed' AND claimed_at < ? AND account_id = ?",
+  ).all(staleThreshold, accountId) as Array<{ lead_id: string }>).map(r => r.lead_id);
+
   const stale = db.prepare(
-    "UPDATE extension_tasks SET status = 'failed', error_message = 'timeout_no_result' WHERE status = 'claimed' AND claimed_at < ? AND account_id = ?",
-  ).run(staleThreshold, accountId);
+    "UPDATE extension_tasks SET status = 'failed', error_message = 'timeout_no_result', completed_at = ? WHERE status = 'claimed' AND claimed_at < ? AND account_id = ?",
+  ).run(now, staleThreshold, accountId);
+
   if (stale.changes > 0) {
-    logger.warn('Extension tasks timed out', { accountId, count: stale.changes });
+    logger.warn('Extension tasks timed out — resetting leads for immediate retry', { accountId, count: stale.changes });
+    // Reset lead next_action_at so the worker re-queues promptly (not in 1 hour)
+    for (const leadId of staleLeadIds) {
+      db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+        .run(now, now, leadId);
+    }
   }
 
   // Get next pending task

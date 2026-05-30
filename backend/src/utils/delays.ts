@@ -12,9 +12,14 @@ export const SAFE_LIMITS = {
   betweenLeads: { min: 60_000, max: 180_000 },
   betweenSessions: { min: 3_600_000, max: 7_200_000 },
 
-  // ⚠️ TESTING MODE: 24/7. For production change back to {start: 9, end: 18} and [1-5]
-  workingHours: { start: 0, end: 24 },
-  workingDays: [0, 1, 2, 3, 4, 5, 6] as const,
+  // Working hours — gate on NODE_ENV so production never runs 24/7
+  // In development/testing: 24/7. In production: Mon-Fri 9-18 (account timezone)
+  workingHours: process.env.NODE_ENV === 'production'
+    ? { start: 9, end: 18 }
+    : { start: 0, end: 24 },
+  workingDays: (process.env.NODE_ENV === 'production'
+    ? [1, 2, 3, 4, 5]
+    : [0, 1, 2, 3, 4, 5, 6]) as unknown as readonly number[],
 } as const;
 
 export function isWithinWorkingHours(timezone = 'America/New_York'): boolean {
