@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { getSetting, setSetting } from '../services/storage';
 import { isSessionActive, startManualLogin } from '../services/browser';
 import { testProxycurlConnection } from '../services/proxycurl';
@@ -33,12 +34,12 @@ router.get('/', (_req: Request, res: Response) => {
   settings['smtp_secure'] = getSetting('smtp_secure') || '0';
   // CRM non-secret fields
   settings['pipedrive_domain'] = getSetting('pipedrive_domain') || '';
-  // Extension token — seed a fixed default if not yet set
-  const DEFAULT_EXT_TOKEN = 'a08a93ff-7c68-458b-80ad-c77e3b73dd26';
+  // Extension token — generate a random one if not yet set (never hardcode)
   let extToken = getSetting('extension_token') ?? '';
   if (!extToken) {
-    extToken = DEFAULT_EXT_TOKEN;
+    extToken = randomUUID();
     setSetting('extension_token', extToken);
+    logger.info('Extension token generated on settings read');
   }
   settings['extension_token'] = extToken;
   return res.json(settings);
