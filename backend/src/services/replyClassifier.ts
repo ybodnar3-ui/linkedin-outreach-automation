@@ -55,7 +55,7 @@ async function callAI(prompt: string): Promise<ClassificationResult | null> {
       });
       if (res.ok) {
         const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-        return JSON.parse(data.choices[0].message.content) as ClassificationResult;
+        return safeParseClassification(data.choices?.[0]?.message?.content);
       }
     } catch { /* fall through to anthropic */ }
   }
@@ -74,12 +74,29 @@ async function callAI(prompt: string): Promise<ClassificationResult | null> {
       });
       if (res.ok) {
         const data = await res.json() as { content: Array<{ text: string }> };
-        return JSON.parse(data.content[0].text) as ClassificationResult;
+        return safeParseClassification(data.content?.[0]?.text);
       }
     } catch { /* ignore */ }
   }
 
   return null;
+}
+
+/**
+ * Tolerantly extract a classification JSON object from an LLM response.
+ * Handles markdown-fenced ```json blocks and surrounding prose. Returns null
+ * if no valid JSON object can be parsed (never throws).
+ */
+function safeParseClassification(raw: string | undefined): ClassificationResult | null {
+  if (!raw || typeof raw !== 'string') return null;
+  // Grab the first {...} block, stripping markdown fences/prose around it
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]) as ClassificationResult;
+  } catch {
+    return null;
+  }
 }
 
 export async function classifyReply(messageId: string, text: string): Promise<void> {

@@ -380,15 +380,31 @@ async function loadCampaigns(apiUrl, apiToken, lastCampaignId) {
     });
     if (!res.ok) return;
     const campaigns = await res.json();
-    campaignSelect.innerHTML = campaigns.length
-      ? campaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
-      : '<option value="">No campaigns found</option>';
+    // Build options via DOM API (textContent) to avoid HTML injection from
+    // a campaign name like "</option><script>..."
+    campaignSelect.replaceChildren();
+    if (campaigns.length) {
+      for (const c of campaigns) {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        campaignSelect.appendChild(opt);
+      }
+    } else {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No campaigns found';
+      campaignSelect.appendChild(opt);
+    }
     // Restore previously selected campaign
     if (lastCampaignId) {
       campaignSelect.value = lastCampaignId;
     }
   } catch {
-    campaignSelect.innerHTML = '<option value="">Could not load campaigns</option>';
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Could not load campaigns';
+    campaignSelect.replaceChildren(opt);
   }
 }
 
