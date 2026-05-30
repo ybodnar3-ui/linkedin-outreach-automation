@@ -135,14 +135,36 @@ function sleep(ms) {
  * Find a button whose trimmed text content starts with (or equals) the given text.
  * LinkedIn sometimes adds icons inside buttons so we check startsWith.
  */
+/**
+ * Find any clickable element whose visible text or aria-label matches.
+ * Uses querySelectorAll('*') to handle LinkedIn's non-standard HTML structures.
+ */
 function findButton(text) {
-  const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-  return btns.find(b => {
-    const label = (b.getAttribute('aria-label') || b.ariaLabel || '').trim();
-    const textContent = (b.textContent || '').trim();
-    return label === text || label.startsWith(text) ||
-           textContent === text || textContent.startsWith(text);
-  }) || null;
+  const lowerText = text.toLowerCase();
+  const all = document.querySelectorAll('*');
+  for (const el of all) {
+    const tag = el.tagName.toLowerCase();
+    const isClickable = tag === 'button' || tag === 'a' ||
+      el.getAttribute('role') === 'button' ||
+      el.getAttribute('role') === 'link';
+    if (!isClickable) continue;
+
+    // Check aria-label first (most reliable)
+    const label = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+    if (label === lowerText || label.startsWith(lowerText + ' ')) return el;
+
+    // Check visible text via innerText (skips SVG, hidden nodes)
+    const inner = (el.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (inner === lowerText) return el;
+
+    // Check artdeco span inside (LinkedIn's button text wrapper)
+    const span = el.querySelector('.artdeco-button__text');
+    if (span) {
+      const spanText = (span.innerText || span.textContent || '').trim().toLowerCase();
+      if (spanText === lowerText || spanText.startsWith(lowerText)) return el;
+    }
+  }
+  return null;
 }
 
 /**
@@ -203,22 +225,34 @@ async function checkConnection() {
  * Find a button by aria-label or text, with broader matching for LinkedIn's varied button structures.
  */
 function findConnectButton() {
-  const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-  // First: exact aria-label match for "Connect" or "Invite ... to connect"
-  for (const b of btns) {
-    const label = (b.getAttribute('aria-label') || '').trim();
-    if (label === 'Connect' || /^Connect with /i.test(label) || /^Invite .+ to connect/i.test(label)) {
-      return b;
+  // Collect all Connect-like buttons/links on the page
+  const allConnectBtns = [];
+  for (const el of document.querySelectorAll('*')) {
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') continue;
+    const label = (el.getAttribute('aria-label') || '').trim();
+    const inner = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    const isConnect = label === 'Connect' || /^Connect with /i.test(label) ||
+                      /^Invite .+ to connect/i.test(label) || inner === 'Connect';
+    if (isConnect) allConnectBtns.push(el);
+  }
+
+  if (allConnectBtns.length === 0) return null;
+  if (allConnectBtns.length === 1) return allConnectBtns[0];
+
+  // Multiple Connect buttons — pick the one highest on the page (profile header)
+  // Use getBoundingClientRect to find the topmost visible one
+  let topBtn = null;
+  let topY = Infinity;
+  for (const btn of allConnectBtns) {
+    const rect = btn.getBoundingClientRect();
+    // Must be visible (not hidden) and in the upper portion of the page
+    if (rect.width > 0 && rect.height > 0 && rect.top < topY) {
+      topY = rect.top;
+      topBtn = btn;
     }
   }
-  // Second: button text starts with "Connect"
-  for (const b of btns) {
-    const text = (b.textContent || '').trim();
-    if (text === 'Connect' || text.startsWith('Connect')) {
-      return b;
-    }
-  }
-  return null;
+  return topBtn;
 }
 
 async function waitForProfileActions(timeoutMs = 10000) {
@@ -243,82 +277,155 @@ async function sendConnection(note) {
   await waitForProfileActions();
   await sleep(1000); // extra settle time
 
-  // Check if already connected / pending
-  if (findButton('Message')) {
-    return { success: true, sent: false, reason: 'already_connected' };
-  }
-  if (findButton('Pending') || document.querySelector('[aria-label*="Pending"]') || document.body.innerText.includes('Invitation sent')) {
+  const bodyText = document.body.innerText || '';
+
+  // Check pending first (Invitation sent / Withdraw = already sent)
+  const isPending = bodyText.includes('Invitation sent') ||
+    !!document.querySelector('[aria-label*="Pending"i]') ||
+    !!findButton('Pending') ||
+    !!findButton('Withdraw');
+  if (isPending) {
     return { success: true, sent: false, reason: 'already_pending' };
   }
 
-  // Click the Connect button (direct or via "More" dropdown)
+  // Try to find Connect button directly first
   let connectBtn = findConnectButton();
+
+  // If not found, try "More" dropdown
   if (!connectBtn) {
-    // Try behind "More" dropdown
     const moreBtn = findButton('More');
     if (moreBtn) {
       moreBtn.click();
       await sleep(1200);
       connectBtn = findConnectButton();
     }
-    if (!connectBtn) {
-      // Last resort: try data-control-name
-      connectBtn = document.querySelector('[data-control-name="connect"]');
-    }
-    if (!connectBtn) {
-      const pageSnippet = document.body.innerText.substring(0, 300);
-      return { success: false, error: `Connect button not found. Page snippet: ${pageSnippet}` };
-    }
   }
+
+  // If not found, try data-control-name fallback
+  if (!connectBtn) {
+    connectBtn = document.querySelector('[data-control-name="connect"]');
+  }
+
+  // No Connect button found — determine why
+  if (!connectBtn) {
+    // Debug: dump first 5 classes from main section to understand page structure
+    const mainEl = document.querySelector('main') || document.querySelector('[role="main"]');
+    const sectionClasses = mainEl ? Array.from(mainEl.querySelectorAll('section')).slice(0,3).map(s => s.className.split(' ').slice(0,3).join('.')).join(' | ') : 'no main';
+    console.log('[LI Outreach] No connect btn found. Sections:', sectionClasses);
+    const is2ndOr3rd = /·\s*(2nd|3rd)\b/i.test(bodyText);
+    const hasMessage = /\bMessage\b/.test(bodyText);
+    // 1st-degree: no degree badge + Message shown = already connected
+    if (hasMessage && !is2ndOr3rd) {
+      return { success: true, sent: false, reason: 'already_connected' };
+    }
+    const snippet = bodyText.substring(0, 400);
+    return { success: false, error: `Connect button not found. Page snippet: ${snippet}` };
+  }
+
+  // Click the Connect button
   connectBtn.click();
 
-  await sleep(1500);
-
-  // Handle the "How do you know X?" modal — click Connect directly
-  const connectDirectly = findButton('Connect');
-  if (connectDirectly) {
-    connectDirectly.click();
-    await sleep(1000);
+  // Wait for modal to appear — poll up to 5s
+  let modal = null;
+  for (let i = 0; i < 10; i++) {
+    await sleep(500);
+    modal = document.querySelector('[role="dialog"]') ||
+            document.querySelector('.artdeco-modal') ||
+            document.querySelector('.send-invite') ||
+            document.querySelector('[class*="send-invite"]') ||
+            document.querySelector('[data-test-modal-id]') ||
+            // Find by Dismiss button's ancestor
+            (() => { const d = findButtonLoose('Dismiss'); return d ? (d.closest('[class*="modal"], [class*="overlay"], [class*="dialog"]') || d.parentElement) : null; })();
+    if (modal) break;
+    // Also check if already sent (no modal needed)
+    if (/Invitation sent|Pending/i.test(document.body.innerText)) {
+      return { success: true, sent: true };
+    }
   }
 
-  // If a note is provided, try to add it
+  // Helper: find button inside modal (or full doc as fallback)
+  function findInModal(text) {
+    const scope = modal || document;
+    const lower = text.toLowerCase();
+    for (const el of scope.querySelectorAll('*')) {
+      const tag = el.tagName.toLowerCase();
+      if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') continue;
+      const label = (el.getAttribute('aria-label') || '').toLowerCase();
+      if (label === lower || label.startsWith(lower)) return el;
+      const inner = (el.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (inner === lower || inner.startsWith(lower)) return el;
+    }
+    return null;
+  }
+
+  // Step 1: Handle "How do you know X?" modal if present
+  const connectInModal = findInModal('Connect');
+  if (connectInModal && connectInModal !== connectBtn) {
+    connectInModal.click();
+    await sleep(1200);
+    // Re-find modal after click
+    modal = document.querySelector('[role="dialog"]') || document.querySelector('.artdeco-modal') || modal;
+  }
+
+  // Step 2: Try "Send without a note" first (simplest, most reliable)
+  const sendWithout = findInModal('Send without a note');
+  if (sendWithout && !sendWithout.disabled) {
+    sendWithout.click();
+    await sleep(1500);
+    return { success: true, sent: true };
+  }
+
+  // Step 3: If note provided, click "Add a note" and fill textarea
   if (note) {
-    const addNoteBtn = findButton('Add a note');
+    const addNoteBtn = findInModal('Add a note');
     if (addNoteBtn) {
       addNoteBtn.click();
-      await sleep(800);
-
-      // Find note textarea
-      const textarea = document.querySelector('#custom-message') ||
-                       document.querySelector('textarea[name="message"]') ||
-                       document.querySelector('textarea[placeholder]');
+      await sleep(1200);
+      const textarea = document.querySelector('textarea') ||
+                       document.querySelector('#custom-message') ||
+                       document.querySelector('[contenteditable="true"]');
       if (textarea) {
         textarea.focus();
         textarea.value = note;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(400);
+        await sleep(600);
       }
     }
   }
 
-  // Click Send / Send invitation
-  const sendBtn = findButton('Send invitation') || findButton('Send');
+  // Step 4: Try any Send variant
+  await sleep(500);
+  const sendBtn = findInModal('Send invitation') ||
+                  findInModal('Send') ||
+                  document.querySelector('button[aria-label*="Send"i]') ||
+                  document.querySelector('button[type="submit"]');
   if (sendBtn && !sendBtn.disabled) {
     sendBtn.click();
     await sleep(1500);
     return { success: true, sent: true };
   }
 
-  // If we ended up on "Send without a note"
-  const sendWithoutNote = findButton('Send without a note');
-  if (sendWithoutNote) {
-    sendWithoutNote.click();
-    await sleep(1500);
-    return { success: true, sent: true };
-  }
+  // Final fallback: dump ALL buttons on page for debugging
+  const visibleBtns = Array.from(document.querySelectorAll('button, [role="button"]'))
+    .map(b => (b.innerText || b.getAttribute('aria-label') || '').trim())
+    .filter(t => t.length > 0)
+    .join(' | ');
+  return { success: false, error: `Send button not found. Visible buttons: ${visibleBtns.substring(0, 300)}` };
+}
 
-  return { success: false, error: 'Send button not found after clicking Connect' };
+// Like findButton but allows startsWith match (for multi-word Send labels)
+function findButtonLoose(text) {
+  const lower = text.toLowerCase();
+  for (const el of document.querySelectorAll('*')) {
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') continue;
+    const label = (el.getAttribute('aria-label') || '').toLowerCase();
+    if (label === lower || label.startsWith(lower)) return el;
+    const inner = (el.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (inner === lower || inner.startsWith(lower)) return el;
+  }
+  return null;
 }
 
 async function sendMessage(messageText) {

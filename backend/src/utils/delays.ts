@@ -27,7 +27,8 @@ export function isWithinWorkingHours(timezone = 'America/New_York'): boolean {
   });
 
   const parts = formatter.formatToParts(now);
-  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+  const rawHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+  const hour = rawHour === 24 ? 0 : rawHour; // Intl returns 24 for midnight with hour12:false
   const weekday = parts.find(p => p.type === 'weekday')?.value || '';
 
   const weekdayMap: Record<string, number> = {
