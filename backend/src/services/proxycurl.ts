@@ -52,6 +52,11 @@ interface ProxycurlProfile {
  * Returns null if no API key configured or request fails.
  */
 export async function fetchProxycurlProfile(linkedinUrl: string): Promise<ProxycurlProfile | null> {
+  // Only forward genuine LinkedIn profile URLs — never an arbitrary/internal URL
+  if (!/^https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+\/?$/i.test(linkedinUrl || '')) {
+    logger.warn('Proxycurl: refused non-LinkedIn URL', { url: linkedinUrl });
+    return null;
+  }
   const apiKey = getSetting('proxycurl_api_key');
   if (!apiKey) return null;
 
@@ -136,7 +141,7 @@ export function saveProxycurlEmail(leadId: string, profile: ProxycurlProfile): v
     email_found_at = ?, email_status = 'found', updated_at = ?
     WHERE id = ?
   `).run(email, now, now, leadId);
-  logger.info('Proxycurl: email saved', { leadId, email });
+  logger.info('Proxycurl: email saved', { leadId });
 }
 
 /**

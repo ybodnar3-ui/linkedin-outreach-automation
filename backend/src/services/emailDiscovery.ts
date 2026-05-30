@@ -128,7 +128,7 @@ export async function discoverEmail(leadId: string): Promise<EmailDiscoveryResul
       UPDATE leads SET email = ?, email_source = ?, email_found_at = ?, email_status = 'found', updated_at = ?
       WHERE id = ?
     `).run(email, source, now, now, leadId);
-    logger.info('Email discovered', { leadId, email, source });
+    logger.info('Email discovered', { leadId, source });
     return { email, source, status: 'found' };
   }
 

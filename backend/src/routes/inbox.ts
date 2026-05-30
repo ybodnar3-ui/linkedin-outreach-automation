@@ -4,6 +4,7 @@ import { sendReply } from '../services/inbox';
 import { classifyReply } from '../services/replyClassifier';
 import { getBrowser, getBrowserForAccount } from '../services/browser';
 import { getAccount } from '../services/accounts';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -68,7 +69,8 @@ router.post('/:threadId/reply', async (req: Request, res: Response) => {
     if (!ok) return res.status(500).json({ error: 'Failed to send reply' });
     return res.json({ ok: true });
   } catch (err) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+    logger.error('Failed to send reply', { threadId: req.params.threadId, error: err instanceof Error ? err.message : String(err) });
+    return res.status(500).json({ error: 'Failed to send reply' });
   }
 });
 

@@ -10,6 +10,19 @@ if (!fs.existsSync(SESSION_DIR)) {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
+/**
+ * Guard against path traversal: a session file path must resolve to inside
+ * SESSION_DIR. Throws otherwise. Returns the resolved absolute path.
+ */
+function assertWithinSessionDir(sessionFile: string): string {
+  const resolved = path.resolve(sessionFile);
+  const dir = path.resolve(SESSION_DIR);
+  if (resolved !== dir && !resolved.startsWith(dir + path.sep)) {
+    throw new Error('Session file path escapes the sessions directory');
+  }
+  return resolved;
+}
+
 // Stable fingerprint — never change once first session is created
 const BROWSER_CONFIG = {
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -131,12 +144,13 @@ export async function getBrowserForAccount(
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
   });
 
-  if (fs.existsSync(sessionFile)) {
+  const safeSessionFile = assertWithinSessionDir(sessionFile);
+  if (fs.existsSync(safeSessionFile)) {
     try {
-      const cookies = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      const cookies = JSON.parse(fs.readFileSync(safeSessionFile, 'utf-8'));
       await context.addCookies(cookies);
     } catch (err) {
-      logger.warn('Corrupt account session file — starting without cookies', { accountId, sessionFile, error: String(err) });
+      logger.warn('Corrupt account session file — starting without cookies', { accountId, error: String(err) });
     }
   }
 
@@ -153,7 +167,8 @@ export async function closeAccountBrowser(accountId: string): Promise<void> {
 }
 
 export function saveSessionForAccount(accountId: string, sessionFile: string, cookies: Parameters<BrowserContext['addCookies']>[0]): void {
-  fs.writeFileSync(sessionFile, JSON.stringify(cookies, null, 2));
+  const safeSessionFile = assertWithinSessionDir(sessionFile);
+  fs.writeFileSync(safeSessionFile, JSON.stringify(cookies, null, 2));
   logger.info('Session saved for account', { accountId });
 }
 

@@ -119,7 +119,16 @@ async function hubspotUpsert(lead: LeadRow, apiKey: string): Promise<string> {
 
 // ─── Pipedrive ───────────────────────────────────────────────────────────────
 
+// Pipedrive subdomain is a user-supplied setting — must be a bare alphanumeric
+// subdomain, never a path or full host (prevents SSRF via crafted domain).
+function assertValidPipedriveDomain(domain: string): void {
+  if (!/^[a-zA-Z0-9-]+$/.test(domain)) {
+    throw new Error('Invalid Pipedrive domain');
+  }
+}
+
 async function pipedriveUpsert(lead: LeadRow, apiToken: string, domain: string): Promise<string> {
+  assertValidPipedriveDomain(domain);
   const BASE = `https://${domain}.pipedrive.com/api/v1`;
   const q = `?api_token=${apiToken}`;
   const jsonHeaders = { 'Content-Type': 'application/json' };
@@ -289,7 +298,7 @@ export async function testCrmConnections(): Promise<{
 
   const pipedriveToken  = getSetting('pipedrive_api_token');
   const pipedriveDomain = getSetting('pipedrive_domain');
-  if (pipedriveToken && pipedriveDomain) {
+  if (pipedriveToken && pipedriveDomain && /^[a-zA-Z0-9-]+$/.test(pipedriveDomain)) {
     try {
       const res = await fetch(
         `https://${pipedriveDomain}.pipedrive.com/api/v1/persons?api_token=${pipedriveToken}&limit=1`,
