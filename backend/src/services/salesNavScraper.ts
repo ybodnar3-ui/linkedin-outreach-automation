@@ -129,21 +129,18 @@ export async function scrapeSalesNav(
         const firstName = parts[0] || null;
         const lastName = parts.slice(1).join(' ') || null;
 
-        // Convert sales navigator profile URL to regular LinkedIn URL
-        let linkedinUrl = card.href;
-        if (linkedinUrl.includes('/sales/lead/')) {
-          // Sales Nav URL: /sales/lead/ACwAA....,name,Title
-          // Extract linkedin profile from the URL if possible, otherwise keep as-is
-          const match = linkedinUrl.match(/\/sales\/lead\/([^,]+)/);
-          if (match) {
-            // We keep the sales nav URL but we'll need to resolve it
-            // For now just use the href as-is — the worker can handle sales nav URLs
-            linkedinUrl = card.href;
-          }
+        const linkedinUrl = card.href;
+
+        // The campaign worker / Playwright actions only handle public /in/ profile
+        // URLs. Sales Navigator /sales/lead/ URLs can't be visited or connected to,
+        // so skip them instead of importing a lead that will silently fail.
+        if (linkedinUrl?.includes('/sales/lead/')) {
+          errors.push(`Skipped: Sales Navigator URL cannot be resolved to a public profile for "${card.name}"`);
+          continue;
         }
 
-        if (!linkedinUrl || (!linkedinUrl.includes('linkedin.com'))) {
-          errors.push(`Skipped: no LinkedIn URL for "${card.name}"`);
+        if (!linkedinUrl || !/linkedin\.com\/in\//i.test(linkedinUrl)) {
+          errors.push(`Skipped: no public LinkedIn profile URL for "${card.name}"`);
           continue;
         }
 

@@ -616,7 +616,7 @@ export async function scrapeContactInfo(
     });
 
     if (result.email) {
-      logger.info('Email scraped from contact info', { url: linkedinUrl, accountId, email: result.email });
+      logger.info('Email scraped from contact info', { url: linkedinUrl, accountId, hasEmail: true });
     }
     return result;
   } catch (err) {

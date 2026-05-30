@@ -57,7 +57,8 @@ chrome.webRequest.onCompleted.addListener(
     const url = details.url;
     if (!url.includes('/voyager/api/search/') && !url.includes('/voyager/api/graphql')) return;
 
-    console.log('[LI Outreach] webRequest captured URL:', url.substring(0, 150));
+    // Don't log the raw Voyager URL — it embeds search filters / PII in query params
+    console.log('[LI Outreach] Voyager API URL captured');
 
     const entry = _voyagerByTab.get(details.tabId) || { url: null, csrfToken: null, resolvers: [] };
     entry.url = url;
