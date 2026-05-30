@@ -1,6 +1,7 @@
 import Database, { Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 
 const DB_DIR = path.join(process.cwd(), '..', 'data');
 const DB_PATH = path.join(DB_DIR, 'database.sqlite');
@@ -210,10 +211,10 @@ export function initDb(): void {
     );
   `);
 
-  // Seed extension token on first run so extension can connect immediately
+  // Seed extension token on first run — generate a random UUID, never hardcode
   const existingExtToken = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('extension_token');
   if (!existingExtToken) {
-    db.prepare('INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)').run('extension_token', 'a08a93ff-7c68-458b-80ad-c77e3b73dd26');
+    db.prepare('INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)').run('extension_token', randomUUID());
   }
 
   // Chrome Extension task queue

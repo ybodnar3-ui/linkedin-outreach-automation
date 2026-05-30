@@ -1292,6 +1292,13 @@ async function pushBatchToBackend(allLeadsArray, campaignId, accountId, apiUrl, 
 // Batch message handlers
 chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
   if (message.type === 'LI_OUTREACH_BATCH_START') {
+    // Validate apiUrl to prevent SSRF — only allow http(s)://localhost or configured backend
+    const urlOk = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(message.apiUrl || '');
+    if (!urlOk) {
+      console.error('[Batch] Rejected unsafe apiUrl:', message.apiUrl);
+      chrome.runtime.sendMessage({ type: 'LI_OUTREACH_BATCH_PROGRESS', text: '❌ Invalid backend URL', done: true }).catch(() => {});
+      return;
+    }
     _batchPushedSet = new Set(); // reset dedup tracking for new batch
     runBatchWebSearch(
       message.keywords,

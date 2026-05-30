@@ -524,6 +524,13 @@ async function runCampaignsForAccount(accountId: string): Promise<void> {
       if (steps.length === 0) continue;
 
       const now = Math.floor(Date.now() / 1000);
+
+      // Mark replied leads as completed so they don't pollute the pending queue
+      db.prepare(`
+        UPDATE leads SET status = 'completed', updated_at = ?
+        WHERE campaign_id = ? AND status IN ('pending','in_progress') AND replied_at IS NOT NULL
+      `).run(now, campaign.id);
+
       const leads = db.prepare(`
         SELECT * FROM leads
         WHERE campaign_id = ?

@@ -135,8 +135,19 @@ router.post('/result', (req: Request, res: Response) => {
 
   if (!task_id || !status) return res.status(400).json({ error: 'task_id and status required' });
 
+  // Validate status is one of the allowed values
+  if (status !== 'done' && status !== 'failed') {
+    return res.status(400).json({ error: 'status must be "done" or "failed"' });
+  }
+
   const task = db.prepare('SELECT * FROM extension_tasks WHERE id = ?').get(task_id) as Record<string, unknown> | undefined;
   if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  // Idempotency: if task was already processed (not claimed), skip to avoid double-advancing the lead
+  if (task.status !== 'claimed') {
+    logger.warn('Extension result for non-claimed task — skipping (already processed)', { taskId: task_id, currentStatus: task.status });
+    return res.json({ ok: true, already_processed: true });
+  }
 
   const now = Math.floor(Date.now() / 1000);
 
