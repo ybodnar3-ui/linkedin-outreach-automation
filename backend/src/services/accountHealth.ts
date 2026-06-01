@@ -155,6 +155,11 @@ export function incrementAccountTracker(
   accountId: string,
   field: 'connections_sent' | 'messages_sent' | 'profiles_visited',
 ): void {
+  // Column names can't be parameterized — guard against a non-literal field
+  // ever reaching the interpolated SQL (defense-in-depth vs injection).
+  if (!['connections_sent', 'messages_sent', 'profiles_visited'].includes(field)) {
+    throw new Error(`Invalid tracker field: ${field}`);
+  }
   const today = new Date().toISOString().split('T')[0];
   db.prepare(`
     INSERT INTO account_daily_tracker (account_id, date, ${field}) VALUES (?, ?, 1)

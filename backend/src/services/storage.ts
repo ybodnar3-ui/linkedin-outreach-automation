@@ -261,6 +261,9 @@ export function getTodayTracker(): { connections_sent: number; messages_sent: nu
 }
 
 export function incrementTracker(field: 'connections_sent' | 'messages_sent' | 'profiles_visited'): void {
+  if (!['connections_sent', 'messages_sent', 'profiles_visited'].includes(field)) {
+    throw new Error(`Invalid tracker field: ${field}`);
+  }
   const today = new Date().toISOString().split('T')[0];
   db.prepare(`INSERT INTO daily_tracker (date, ${field}) VALUES (?, 1)
     ON CONFLICT(date) DO UPDATE SET ${field} = ${field} + 1`).run(today);
