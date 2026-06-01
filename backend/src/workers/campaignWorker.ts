@@ -308,6 +308,20 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
         logger.warn('Message step has no message_text', { stepId: step.id });
         break;
       }
+      // Safety: never message a lead whose connection isn't accepted yet, even
+      // if the step condition is 'always'. Messaging a non-connection fails
+      // (or sends a paid InMail) — defer until accepted, up to 14 days.
+      if (lead.connection_sent_at && !lead.connected_at) {
+        const daysPending = (now - lead.connection_sent_at) / 86400;
+        if (daysPending > 14) {
+          db.prepare("UPDATE leads SET status = 'skipped', skip_reason = 'connection_not_accepted_14d', updated_at = ? WHERE id = ?")
+            .run(now, lead.id);
+        } else {
+          db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+            .run(now + 86400, now, lead.id);
+        }
+        return;
+      }
       if (!canAccountPerformAction(accountId, 'message')) {
         logger.info('Daily message limit reached — deferring to tomorrow', { accountId });
         broadcastLog('limit_reached', { action: 'message', accountId });

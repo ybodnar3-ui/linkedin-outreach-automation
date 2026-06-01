@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, getSetting, setSetting } from '../services/storage';
+import { db, getSetting, setSetting, incrementTracker } from '../services/storage';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 import { fireWebhookEvent } from '../services/webhookService';
@@ -358,16 +358,18 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
   switch (task.action as string) {
     case 'visit_profile':
     case 'follow_profile':
-      // Count the visit toward the daily cap (extension path mirrors Playwright path)
+      // Count the visit: account_daily_tracker enforces the cap, daily_tracker
+      // feeds dashboard analytics — increment both (mirrors the Playwright path).
       incrementAccountTracker(accountId, 'profiles_visited');
+      incrementTracker('profiles_visited');
       advanceLeadStep(leadId, lead.current_step, waitDays, now);
       break;
 
     case 'send_connection':
       if (result.sent) {
-        // CRITICAL for ban prevention: increment the daily connection counter so
-        // canAccountPerformAction enforces the 20/day cap on the extension path too.
+        // CRITICAL for ban prevention: enforced counter + analytics counter
         incrementAccountTracker(accountId, 'connections_sent');
+        incrementTracker('connections_sent');
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('connection_sent', { leadId, url: lead.linkedin_url });
       }
@@ -377,6 +379,7 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
     case 'send_message':
       if (result.sent) {
         incrementAccountTracker(accountId, 'messages_sent');
+        incrementTracker('messages_sent');
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('message_sent', { leadId, url: lead.linkedin_url });
       }
