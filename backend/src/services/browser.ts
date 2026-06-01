@@ -15,8 +15,12 @@ if (!fs.existsSync(SESSION_DIR)) {
  * SESSION_DIR. Throws otherwise. Returns the resolved absolute path.
  */
 function assertWithinSessionDir(sessionFile: string): string {
-  const resolved = path.resolve(sessionFile);
   const dir = path.resolve(SESSION_DIR);
+  // If the stored value is just a filename (no directory), treat it as
+  // relative to SESSION_DIR (legacy accounts store e.g. "alyona.json")
+  const resolved = path.isAbsolute(sessionFile)
+    ? path.resolve(sessionFile)
+    : path.resolve(SESSION_DIR, sessionFile);
   if (resolved !== dir && !resolved.startsWith(dir + path.sep)) {
     throw new Error('Session file path escapes the sessions directory');
   }

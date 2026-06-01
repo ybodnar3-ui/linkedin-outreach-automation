@@ -520,11 +520,27 @@ async function sendMessage(messageText) {
   }
 
   if (!msgBox) {
-    // Debug: show what's visible in any overlay
-    const overlayBtns = Array.from(document.querySelectorAll('[class*="msg"] button, [class*="overlay"] button'))
-      .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
-      .filter(t => t).slice(0, 8).join(' | ');
-    return { success: false, error: `Message compose box not found. Overlay buttons: ${overlayBtns}` };
+    // LinkedIn sometimes navigates to a full /messaging/ page instead of overlay.
+    // Wait briefly for navigation and try /messaging/ page selectors.
+    await sleep(2000);
+    msgBox = document.querySelector('[contenteditable="true"][role="textbox"]') ||
+             document.querySelector('.msg-form__contenteditable') ||
+             document.querySelector('[data-placeholder*="message" i]') ||
+             document.querySelector('[aria-label*="Write a message" i]') ||
+             document.querySelector('.msg-content-wrapper [contenteditable]') ||
+             document.querySelector('#messaging-compose-message') ||
+             document.querySelector('[class*="compose"] [contenteditable]') ||
+             document.querySelector('[class*="thread"] [contenteditable]') ||
+             document.querySelector('[class*="message"] [contenteditable="true"]');
+  }
+
+  if (!msgBox) {
+    // Debug: show page URL and any contenteditable/textbox on page
+    const editables = Array.from(document.querySelectorAll('[contenteditable], [role="textbox"]'))
+      .map(el => el.tagName + '.' + el.className.split(' ').slice(0,2).join('.'))
+      .slice(0, 5).join(' | ');
+    const url = window.location.href.replace(/^https:\/\/www\.linkedin\.com/, '');
+    return { success: false, error: `Compose box not found. URL: ${url} | editables: ${editables}` };
   }
 
   // Type the message — use clipboard paste approach (most reliable for contenteditable)
