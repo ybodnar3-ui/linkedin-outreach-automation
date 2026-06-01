@@ -520,24 +520,31 @@ async function sendMessage(messageText) {
   }
 
   if (!msgBox) {
-    // LinkedIn sometimes navigates to a full /messaging/ page instead of overlay.
-    // Wait briefly for navigation and try /messaging/ page selectors.
-    await sleep(2000);
-    msgBox = document.querySelector('[contenteditable="true"][role="textbox"]') ||
-             document.querySelector('.msg-form__contenteditable') ||
-             document.querySelector('[data-placeholder*="message" i]') ||
-             document.querySelector('[aria-label*="Write a message" i]') ||
-             document.querySelector('.msg-content-wrapper [contenteditable]') ||
-             document.querySelector('#messaging-compose-message') ||
-             document.querySelector('[class*="compose"] [contenteditable]') ||
-             document.querySelector('[class*="thread"] [contenteditable]') ||
-             document.querySelector('[class*="message"] [contenteditable="true"]');
+    // LinkedIn navigated to /messaging/thread/new/ — React renders async.
+    // Use MutationObserver to catch the compose box as soon as it appears.
+    msgBox = await new Promise((resolve) => {
+      // Already in DOM?
+      const find = () =>
+        document.querySelector('[contenteditable="true"][role="textbox"]') ||
+        document.querySelector('.msg-form__contenteditable') ||
+        document.querySelector('[data-placeholder*="message" i]') ||
+        document.querySelector('[aria-label*="message" i][contenteditable]') ||
+        document.querySelector('[contenteditable="true"]');
+      const existing = find();
+      if (existing) { resolve(existing); return; }
+
+      const obs = new MutationObserver(() => {
+        const el = find();
+        if (el) { obs.disconnect(); clearTimeout(timer); resolve(el); }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+      const timer = setTimeout(() => { obs.disconnect(); resolve(null); }, 15000);
+    });
   }
 
   if (!msgBox) {
-    // Debug: show page URL and any contenteditable/textbox on page
     const editables = Array.from(document.querySelectorAll('[contenteditable], [role="textbox"]'))
-      .map(el => el.tagName + '.' + el.className.split(' ').slice(0,2).join('.'))
+      .map(el => el.tagName + '.' + (el.className || '').split(' ').slice(0,2).join('.'))
       .slice(0, 5).join(' | ');
     const url = window.location.href.replace(/^https:\/\/www\.linkedin\.com/, '');
     return { success: false, error: `Compose box not found. URL: ${url} | editables: ${editables}` };
