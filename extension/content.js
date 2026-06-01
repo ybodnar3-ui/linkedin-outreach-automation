@@ -486,40 +486,84 @@ function findButtonLoose(text) {
 async function sendMessage(messageText) {
   if (!messageText) return { success: false, error: 'No message text provided' };
 
-  // Find the Message button on the profile
-  const messageBtn = findButton('Message');
+  // Find Message button using the same broad search as findConnectButton
+  const messageBtn = findButton('Message') ||
+    Array.from(document.querySelectorAll('*')).find(el => {
+      const tag = el.tagName.toLowerCase();
+      if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') return false;
+      const label = (el.getAttribute('aria-label') || '').toLowerCase();
+      return label.startsWith('message') || (el.innerText || '').trim().toLowerCase() === 'message';
+    });
+
   if (!messageBtn) {
     return { success: false, error: 'Message button not found — lead may not be connected' };
   }
   messageBtn.click();
-  await sleep(2000);
 
-  // LinkedIn message compose box (contenteditable div)
+  // Wait for the compose box to appear — LinkedIn 2024/2025 opens a chat overlay
+  // at the bottom of the page with various possible selectors
   let msgBox = null;
-  try {
-    msgBox = await waitForElement('.msg-form__contenteditable', 5000);
-  } catch {
-    // fallback selectors
-    msgBox = document.querySelector('[data-placeholder="Write a message…"]') ||
-             document.querySelector('[role="textbox"][aria-label]');
+  for (let i = 0; i < 15; i++) {
+    await sleep(600);
+    msgBox = document.querySelector('.msg-form__contenteditable') ||
+             document.querySelector('[data-placeholder="Write a message…"]') ||
+             document.querySelector('[data-placeholder*="message" i]') ||
+             document.querySelector('.msg-form [contenteditable="true"]') ||
+             document.querySelector('[role="textbox"][aria-label*="message" i]') ||
+             document.querySelector('[role="textbox"][aria-label*="Message" i]') ||
+             document.querySelector('.msg-form__contenteditable[contenteditable]') ||
+             document.querySelector('[contenteditable="true"][aria-placeholder]') ||
+             document.querySelector('.msg-overlay-conversation-bubble [contenteditable="true"]') ||
+             document.querySelector('.msg-overlay-list-bubble [contenteditable="true"]') ||
+             document.querySelector('[contenteditable="true"][role="textbox"]');
+    if (msgBox) break;
   }
 
   if (!msgBox) {
-    return { success: false, error: 'Message compose box not found' };
+    // Debug: show what's visible in any overlay
+    const overlayBtns = Array.from(document.querySelectorAll('[class*="msg"] button, [class*="overlay"] button'))
+      .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
+      .filter(t => t).slice(0, 8).join(' | ');
+    return { success: false, error: `Message compose box not found. Overlay buttons: ${overlayBtns}` };
   }
 
-  // Clear and type the message
+  // Type the message — use clipboard paste approach (most reliable for contenteditable)
   msgBox.focus();
-  // For contenteditable divs we set innerHTML; dispatch input event so React/Vue picks it up
-  msgBox.innerHTML = '';
-  document.execCommand('insertText', false, messageText);
-  msgBox.dispatchEvent(new Event('input', { bubbles: true }));
-  await sleep(600);
+  msgBox.click();
+  await sleep(300);
 
-  // Click Send
-  const sendBtn = document.querySelector('.msg-form__send-button') ||
-                  document.querySelector('button[type="submit"]') ||
-                  findButton('Send');
+  // Clear existing content
+  msgBox.innerHTML = '';
+  msgBox.textContent = '';
+
+  // Insert text via DataTransfer (same approach as note in sendConnection)
+  try {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', messageText);
+    msgBox.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  } catch {
+    // Fallback: execCommand
+    msgBox.focus();
+    document.execCommand('selectAll', false);
+    document.execCommand('insertText', false, messageText);
+  }
+  msgBox.dispatchEvent(new Event('input', { bubbles: true }));
+  msgBox.dispatchEvent(new Event('change', { bubbles: true }));
+  await sleep(800);
+
+  // Find and click Send — scoped to the message overlay/form
+  const msgContainer = msgBox.closest('[class*="msg-form"], [class*="overlay"], [class*="compose"]') || document;
+  const sendBtn = msgContainer.querySelector('[class*="send-button"]') ||
+                  msgContainer.querySelector('button[type="submit"]') ||
+                  msgContainer.querySelector('[aria-label*="Send" i]') ||
+                  (() => {
+                    // Walk all buttons in container, find one with text Send
+                    for (const el of msgContainer.querySelectorAll('button, [role="button"]')) {
+                      const t = (el.getAttribute('aria-label') || el.innerText || '').trim().toLowerCase();
+                      if (t === 'send' || t.startsWith('send message')) return el;
+                    }
+                    return null;
+                  })();
 
   if (sendBtn && !sendBtn.disabled) {
     sendBtn.click();
@@ -527,7 +571,11 @@ async function sendMessage(messageText) {
     return { success: true, sent: true };
   }
 
-  return { success: false, error: 'Send button not found in message composer' };
+  // Debug: list buttons in the overlay
+  const visibleBtns = Array.from(msgContainer.querySelectorAll('button, [role="button"]'))
+    .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
+    .filter(t => t.length > 0 && t.length < 40).slice(0, 10).join(' | ');
+  return { success: false, error: `Send button not found. Composer buttons: ${visibleBtns}` };
 }
 
 // ── LinkedIn Search Scraper ───────────────────────────────────────────────────
