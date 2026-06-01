@@ -57,7 +57,7 @@ const wss = new WebSocketServer({
       jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-change-in-production');
       done(true);
     } catch {
-      logger.warn('WebSocket upgrade rejected — invalid/missing token');
+      logger.debug('WebSocket upgrade rejected — invalid/missing token');
       done(false, 401, 'Unauthorized');
     }
   },
