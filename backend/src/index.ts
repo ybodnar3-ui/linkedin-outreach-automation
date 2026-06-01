@@ -37,7 +37,9 @@ app.use(cors({
     if (!origin) return cb(null, true);
     if (FRONTEND_URL && origin === FRONTEND_URL) return cb(null, true);
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'));
+    // Disallowed origin: omit CORS headers (browser blocks the read) without
+    // throwing — avoids a noisy 500 + error log for every probe.
+    return cb(null, false);
   },
 }));
 app.use(express.json({ limit: '256kb' }));
