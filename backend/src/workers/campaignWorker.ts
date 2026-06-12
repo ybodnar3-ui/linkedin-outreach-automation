@@ -1,11 +1,10 @@
 import cron from 'node-cron';
 import { v4 as uuidv4 } from 'uuid';
-import { db, getSetting } from '../services/storage';
+import { db, getSetting, acquireWorkerLease, releaseWorkerLease } from '../services/storage';
 import { logger } from '../utils/logger';
 import { broadcastLog } from '../index';
 import { isWithinWorkingHours } from '../utils/delays';
 import { canAccountPerformAction, runNightlyHealthBonus } from '../services/accountHealth';
-import { visitProfile, sendConnectionRequest, sendMessage, checkConnectionStatus, followProfile, sendInMail, likeRecentPosts, scrapeContactInfo } from '../services/linkedin';
 import { leadDelay, actionDelay } from '../utils/humanizer';
 import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
@@ -13,9 +12,21 @@ import { generateIcebreaker } from '../services/icebreaker';
 import { sendEmail } from '../services/emailSender';
 import { syncLeadToCrm } from '../services/crmSync';
 import { fireWebhookEvent } from '../services/webhookService';
+import { recordLeadEvent } from '../services/events';
 
 const runningAccounts = new Set<string>();
 let cycleRunning = false;
+
+// Per-process identity + lease config for the cross-process worker lock.
+// Two backend processes must never run the campaign worker simultaneously
+// (double LinkedIn actions = ban). The in-process `cycleRunning` flag guards
+// overlap within ONE process; the DB lease guards against a SECOND process.
+const WORKER_LOCK_NAME = 'campaign_worker';
+const WORKER_HOLDER_ID = uuidv4();
+// Lease is considered dead after 3 missed ticks (worker runs every 5 min).
+// A crashed holder blocks the standby for at most this long — acceptable, and
+// far safer than ever double-running.
+const WORKER_LEASE_TTL_SECONDS = 15 * 60;
 
 interface Campaign {
   id: string;
@@ -150,23 +161,10 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
   switch (condition) {
     case 'always':
       return true;
-    case 'if_connected': {
-      if (lead.connected_at) return true;
-      // Check live using the correct account's browser context
-      try {
-        const status = await checkConnectionStatus(lead.linkedin_url, accountId);
-        if (status === 'connected') {
-          db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?')
-            .run(Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), lead.id);
-          return true;
-        }
-      } catch (err) {
-        logger.warn('checkConnectionStatus failed', {
-          leadId: lead.id, error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      return false;
-    }
+    case 'if_connected':
+      // Extension-only: acceptance is detected by the check_connection task,
+      // which sets connected_at. We never probe synchronously here.
+      return !!lead.connected_at;
     case 'if_not_replied':
       return lead.replied_at == null; // execute only if lead has NOT replied yet
     default:
@@ -176,15 +174,11 @@ async function checkCondition(condition: string, lead: Lead, accountId: string):
 
 // ── Chrome Extension helpers ──────────────────────────────────────────────────
 
-/**
- * Returns true if the Chrome Extension for this account has pinged within the last 5 minutes.
- * When the extension is active, we queue tasks for it instead of running Playwright.
- */
-function isExtensionActive(accountId: string): boolean {
-  const lastSeen = getSetting(`ext_last_seen_${accountId}`);
-  if (!lastSeen) return false;
-  const elapsed = Math.floor(Date.now() / 1000) - parseFloat(lastSeen);
-  return elapsed < 300; // active if seen within 5 min
+/** Defer a lead's next pick-up by `seconds` (e.g. daily-limit reached → tomorrow). */
+function deferLead(leadId: string, seconds: number): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
+    .run(now + seconds, now, leadId);
 }
 
 /**
@@ -220,6 +214,7 @@ function queueExtensionTask(
   db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
     .run(now + 7200, now, lead.id);
 
+  recordLeadEvent(lead.id, 'task_queued', action);
   logger.info('Extension task queued', { taskId, action, leadId: lead.id, accountId });
 }
 
@@ -240,43 +235,27 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
     case 'visit': {
       if (!canAccountPerformAction(accountId, 'visit')) {
         logger.info('Daily visit limit reached — deferring to tomorrow', { accountId });
-        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
+        deferLead(lead.id, 86400);
         return;
       }
-      if (isExtensionActive(accountId)) {
-        queueExtensionTask(lead, 'visit_profile', { profileUrl: lead.linkedin_url }, accountId);
-        return; // Extension will advance the step via /api/extension/result
-      }
-      await visitProfile(lead.linkedin_url, accountId, lead.id);
-      await actionDelay();
-      break;
+      queueExtensionTask(lead, 'visit_profile', { profileUrl: lead.linkedin_url }, accountId);
+      return; // Extension advances the step via /api/extension/result
     }
     case 'follow': {
       // Follow without connecting — softer first touchpoint
       if (!canAccountPerformAction(accountId, 'visit')) {
         logger.info('Daily visit limit reached (follow) — deferring to tomorrow', { accountId });
-        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
+        deferLead(lead.id, 86400);
         return;
       }
-      if (isExtensionActive(accountId)) {
-        queueExtensionTask(lead, 'follow_profile', { profileUrl: lead.linkedin_url }, accountId);
-        return;
-      }
-      await followProfile(lead.linkedin_url, accountId);
-      await actionDelay();
-      break;
+      queueExtensionTask(lead, 'follow_profile', { profileUrl: lead.linkedin_url }, accountId);
+      return;
     }
     case 'connect': {
       if (!canAccountPerformAction(accountId, 'connection')) {
         logger.info('Daily connection limit reached — deferring to tomorrow', { accountId });
         broadcastLog('limit_reached', { action: 'connection', accountId });
-        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
+        deferLead(lead.id, 86400);
         return;
       }
       let rawNote = step.message_text;
@@ -284,20 +263,8 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
         rawNote = getAssignedText(lead.id, step.ab_test_id) ?? rawNote;
       }
       const note = rawNote ? await renderTemplate(rawNote, lead, website) : undefined;
-      if (isExtensionActive(accountId)) {
-        queueExtensionTask(lead, 'send_connection', { profileUrl: lead.linkedin_url, note: note ?? null }, accountId);
-        return;
-      }
-      // Playwright fallback: like posts then connect
-      likeRecentPosts(lead.linkedin_url, accountId).catch(err =>
-        logger.warn('likeRecentPosts failed (non-fatal)', { leadId: lead.id, error: String(err) }),
-      );
-      const sent = await sendConnectionRequest(lead.linkedin_url, note, accountId);
-      if (sent) {
-        db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
-      }
-      await actionDelay();
-      break;
+      queueExtensionTask(lead, 'send_connection', { profileUrl: lead.linkedin_url, note: note ?? null }, accountId);
+      return;
     }
     case 'message': {
       let rawText = step.message_text;
@@ -310,37 +277,31 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
       }
       // Safety: never message a lead whose connection isn't accepted yet, even
       // if the step condition is 'always'. Messaging a non-connection fails
-      // (or sends a paid InMail) — defer until accepted, up to 14 days.
+      // (or sends a paid InMail). Instead of blind-deferring for up to 14 days,
+      // actively verify acceptance via a check_connection probe so accepted
+      // leads get messaged promptly. The probe sets connected_at and re-runs
+      // this same message step next cycle (it does NOT advance past it).
       if (lead.connection_sent_at && !lead.connected_at) {
         const daysPending = (now - lead.connection_sent_at) / 86400;
         if (daysPending > 14) {
           db.prepare("UPDATE leads SET status = 'skipped', skip_reason = 'connection_not_accepted_14d', updated_at = ? WHERE id = ?")
             .run(now, lead.id);
-        } else {
-          db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-            .run(now + 86400, now, lead.id);
+          return;
         }
+        // Verify acceptance via an extension probe; on success it sets
+        // connected_at and re-runs this same message step next cycle.
+        queueExtensionTask(lead, 'check_connection', { profileUrl: lead.linkedin_url }, accountId);
         return;
       }
       if (!canAccountPerformAction(accountId, 'message')) {
         logger.info('Daily message limit reached — deferring to tomorrow', { accountId });
         broadcastLog('limit_reached', { action: 'message', accountId });
-        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
+        deferLead(lead.id, 86400);
         return;
       }
       const text = await renderTemplate(rawText, lead, website);
-      if (isExtensionActive(accountId)) {
-        queueExtensionTask(lead, 'send_message', { profileUrl: lead.linkedin_url, messageText: text }, accountId);
-        return;
-      }
-      const sent = await sendMessage(lead.linkedin_url, text, accountId);
-      if (sent) {
-        db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
-      }
-      await actionDelay();
-      break;
+      queueExtensionTask(lead, 'send_message', { profileUrl: lead.linkedin_url, messageText: text }, accountId);
+      return;
     }
     case 'send_email': {
       if (!lead.email) {
@@ -363,78 +324,14 @@ async function executeStep(lead: Lead, step: CampaignStep, accountId: string, we
       break;
     }
     case 'send_inmail': {
-      if (!step.message_text) {
-        logger.warn('send_inmail step: no body configured', { stepId: step.id });
-        break;
-      }
-      if (!canAccountPerformAction(accountId, 'message')) {
-        logger.info('Daily message limit reached (inmail) — deferring to tomorrow', { accountId });
-        const tomorrow = Math.floor(Date.now() / 1000) + 86400;
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(tomorrow, Math.floor(Date.now() / 1000), lead.id);
-        return;
-      }
-      const inmailSubject = step.email_subject
-        ? await renderTemplate(step.email_subject, lead, website)
-        : `Hi ${lead.first_name || 'there'}`;
-      const inmailBody = await renderTemplate(step.message_text, lead, website);
-      const result = await sendInMail(lead.linkedin_url, inmailSubject, inmailBody, accountId);
-      if (result === 'sent') {
-        db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
-        broadcastLog('inmail_sent', { leadId: lead.id, url: lead.linkedin_url });
-      } else if (result === 'limit_reached') {
-        logger.warn('InMail credits exhausted — pausing campaign', { accountId });
-        broadcastLog('inmail_limit_reached', { accountId });
-        return; // stop processing this cycle
-      }
-      await actionDelay();
+      // InMail required server-side Playwright (Premium) — not supported in
+      // extension-only mode. Skip and advance so campaigns don't stall.
+      logger.warn('send_inmail not supported in extension-only mode — skipping step', { leadId: lead.id, stepId: step.id });
       break;
     }
     case 'check_connection': {
-      if (isExtensionActive(accountId)) {
-        queueExtensionTask(lead, 'check_connection', { profileUrl: lead.linkedin_url }, accountId);
-        return;
-      }
-      const connStatus = await checkConnectionStatus(lead.linkedin_url, accountId);
-      if (connStatus === 'connected') {
-        db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
-        logger.info('Connection accepted', { leadId: lead.id });
-        broadcastLog('connection_accepted', { leadId: lead.id, url: lead.linkedin_url });
-        // Scrape contact info (email/phone) — free, no Proxycurl needed.
-        // Fire-and-forget: saves to DB when done, doesn't block campaign flow.
-        scrapeContactInfo(lead.linkedin_url, accountId)
-          .then(({ email, phone }) => {
-            if (email || phone) {
-              db.prepare('UPDATE leads SET email = COALESCE(email, ?), updated_at = ? WHERE id = ?')
-                .run(email ?? null, Math.floor(Date.now() / 1000), lead.id);
-              logger.info('Contact info saved after connection', { leadId: lead.id, email, phone });
-            }
-          })
-          .catch(err => logger.warn('scrapeContactInfo failed (non-fatal)', { leadId: lead.id, error: String(err) }));
-        // CRM sync — fire and forget
-        syncLeadToCrm(lead.id).catch(err =>
-          logger.error('CRM sync error on connection', { leadId: lead.id, error: String(err) }),
-        );
-        // Webhook event
-        fireWebhookEvent('connection_accepted', {
-          leadId: lead.id, linkedinUrl: lead.linkedin_url,
-          firstName: lead.first_name, lastName: lead.last_name,
-          company: lead.company, title: lead.title,
-        }).catch(() => {});
-      } else if (connStatus === 'pending') {
-        const sentAt = lead.connection_sent_at || now;
-        const daysPending = (now - sentAt) / 86400;
-        if (daysPending > 14) {
-          db.prepare("UPDATE leads SET status = 'skipped', skip_reason = 'connection_not_accepted_14d', updated_at = ? WHERE id = ?")
-            .run(now, lead.id);
-          return;
-        }
-        db.prepare('UPDATE leads SET next_action_at = ?, updated_at = ? WHERE id = ?')
-          .run(now + 86400, now, lead.id);
-        return;
-      }
-      await actionDelay();
-      break;
+      queueExtensionTask(lead, 'check_connection', { profileUrl: lead.linkedin_url }, accountId);
+      return;
     }
     case 'wait':
     default:
@@ -489,6 +386,7 @@ async function processLead(lead: Lead, steps: CampaignStep[], accountId: string,
   if (blacklistHit) {
     db.prepare("UPDATE leads SET status = 'skipped', skip_reason = ?, updated_at = ? WHERE id = ?")
       .run(`blacklisted:${blacklistHit}`, Math.floor(Date.now() / 1000), lead.id);
+    recordLeadEvent(lead.id, 'skipped', `blacklisted:${blacklistHit}`);
     logger.info('Lead skipped — blacklisted', { leadId: lead.id, match: blacklistHit });
     broadcastLog('lead_skipped', { leadId: lead.id, reason: `blacklisted:${blacklistHit}` });
     fireWebhookEvent('lead_skipped', {
@@ -604,6 +502,12 @@ export function startWorker(): void {
       logger.warn('Previous worker cycle still running — skipping this tick');
       return;
     }
+    // Cross-process guard: only the process holding the lease may run actions.
+    // A second backend instance will never acquire it while the first is alive.
+    if (!acquireWorkerLease(WORKER_LOCK_NAME, WORKER_HOLDER_ID, WORKER_LEASE_TTL_SECONDS)) {
+      logger.warn('Campaign worker lease held by another process — skipping this tick', { holder: WORKER_HOLDER_ID });
+      return;
+    }
     cycleRunning = true;
     runWorkerCycle()
       .catch((err) => {
@@ -621,5 +525,11 @@ export function startWorker(): void {
     }
   });
 
-  logger.info('Campaign worker scheduled (every 5 minutes) + nightly health bonus (00:05)');
+  // Release the lease on graceful shutdown so a restarted/standby process can
+  // take over immediately instead of waiting out the TTL.
+  const releaseOnExit = () => releaseWorkerLease(WORKER_LOCK_NAME, WORKER_HOLDER_ID);
+  process.once('SIGTERM', releaseOnExit);
+  process.once('SIGINT', releaseOnExit);
+
+  logger.info('Campaign worker scheduled (every 5 minutes) + nightly health bonus (00:05)', { holder: WORKER_HOLDER_ID });
 }

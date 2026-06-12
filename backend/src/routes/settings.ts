@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
-import { getSetting, setSetting } from '../services/storage';
-import { isSessionActive, startManualLogin } from '../services/browser';
+import { getSetting, setSetting, db } from '../services/storage';
 import { testProxycurlConnection } from '../services/proxycurl';
 import { logger } from '../utils/logger';
 
@@ -61,11 +60,11 @@ router.put('/', (req: Request, res: Response) => {
 });
 
 router.post('/login', (_req: Request, res: Response) => {
-  // Returns immediately — login happens async in a visible browser window
-  res.json({ ok: true, message: 'Manual login started. Complete login in the browser window.' });
-
-  startManualLogin().catch((err) => {
-    logger.error('Manual login failed', { error: err instanceof Error ? err.message : String(err) });
+  // Extension-only (ADR-001): the LinkedIn session lives in the user's Chrome.
+  // There is no server-side login flow.
+  return res.json({
+    ok: true,
+    message: 'Extension-only mode: log into LinkedIn in your Chrome and connect the extension. No server login needed.',
   });
 });
 
@@ -80,9 +79,14 @@ router.post('/proxycurl/test', async (_req: Request, res: Response) => {
   }
 });
 
-router.get('/session', async (_req: Request, res: Response) => {
+router.get('/session', (_req: Request, res: Response) => {
+  // "Session active" now means: an extension has pinged within the last 5 minutes.
   try {
-    const active = await isSessionActive();
+    const cutoff = Math.floor(Date.now() / 1000) - 300;
+    const row = db.prepare(
+      "SELECT MAX(CAST(value AS INTEGER)) AS last FROM app_settings WHERE key LIKE 'ext_last_seen_%'",
+    ).get() as { last: number | null } | undefined;
+    const active = !!row?.last && row.last >= cutoff;
     return res.json({ active });
   } catch {
     return res.json({ active: false });

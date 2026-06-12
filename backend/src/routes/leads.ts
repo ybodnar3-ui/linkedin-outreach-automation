@@ -6,9 +6,7 @@ import fs from 'fs';
 import { db } from '../services/storage';
 import { logger } from '../utils/logger';
 import { discoverEmail } from '../services/emailDiscovery';
-import { scrapeSalesNav } from '../services/salesNavScraper';
-import { scrapeLinkedInSearch } from '../services/linkedinScraper';
-import { getAccount } from '../services/accounts';
+import { getLeadEvents } from '../services/events';
 
 const router = Router();
 // Cap upload size to protect memory; reject oversized files at the multer layer
@@ -226,98 +224,32 @@ router.post('/import/csv', upload.single('file'), async (req: Request, res: Resp
   return res.json({ added, skipped, errors: errors.length, errorDetails, rowLimitHit });
 });
 
-// POST /api/leads/import-sales-nav — scrape leads from Sales Navigator search URL
-router.post('/import-sales-nav', async (req: Request, res: Response) => {
-  const { campaign_id, search_url, max_leads = 25 } = req.body;
-
-  if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
-  if (!search_url) return res.status(400).json({ error: 'search_url required' });
-
-  const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(campaign_id) as { id: string } | undefined;
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-  const result = await scrapeSalesNav(search_url, Math.min(Number(max_leads), 100));
-
-  if (result.errors.length > 0 && result.leads.length === 0) {
-    return res.status(422).json({ error: result.errors[0], errors: result.errors });
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const insertLead = db.prepare(`
-    INSERT OR IGNORE INTO leads (id, campaign_id, linkedin_url, first_name, last_name, company, title, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  let added = 0;
-  let skipped = 0;
-
-  for (const lead of result.leads) {
-    const ins = insertLead.run(
-      uuidv4(), campaign_id, lead.linkedin_url,
-      lead.first_name, lead.last_name,
-      lead.company, lead.title,
-      now, now
-    );
-    if (ins.changes > 0) { added++; } else { skipped++; }
-  }
-
-  logger.info('Sales Nav import complete', { campaign_id, added, skipped, totalFound: result.totalFound });
-  return res.json({ added, skipped, total_found: result.totalFound, errors: result.errors.length, error_details: result.errors });
+// Server-side Sales Navigator / LinkedIn-search scraping required Playwright and
+// was removed (ADR-001: extension-only). Lead search/import now happens in the
+// Chrome extension popup (web search + Voyager), which POSTs to
+// /api/extension/import-leads. These endpoints return 501 so the dashboard shows
+// a clear message instead of silently failing.
+router.post('/import-sales-nav', (_req: Request, res: Response) => {
+  return res.status(501).json({
+    error: 'Server-side scraping was removed. Import leads from the extension popup (Search / Batch search) instead.',
+  });
 });
 
-// POST /api/leads/import-linkedin-search — scrape regular LinkedIn people search (no Sales Nav needed)
-router.post('/import-linkedin-search', async (req: Request, res: Response) => {
-  const { campaign_id, account_id, search_url, max_leads = 25 } = req.body;
-
-  if (!campaign_id)  return res.status(400).json({ error: 'campaign_id required' });
-  if (!account_id)   return res.status(400).json({ error: 'account_id required' });
-  if (!search_url)   return res.status(400).json({ error: 'search_url required' });
-
-  const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(campaign_id) as { id: string } | undefined;
-  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-  const account = getAccount(account_id as string);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
-  if (account.status !== 'active') return res.status(422).json({ error: 'Account is not active — please connect it first via the Accounts page.' });
-
-  const result = await scrapeLinkedInSearch(
-    account_id as string,
-    account.session_file,
-    search_url as string,
-    Math.min(Number(max_leads), 200),
-  );
-
-  if (result.errors.length > 0 && result.leads.length === 0) {
-    return res.status(422).json({ error: result.errors[0], errors: result.errors });
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const insertLead = db.prepare(`
-    INSERT OR IGNORE INTO leads (id, campaign_id, linkedin_url, first_name, last_name, company, title, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  let added = 0;
-  let skipped = 0;
-  for (const lead of result.leads) {
-    const ins = insertLead.run(
-      uuidv4(), campaign_id, lead.linkedin_url,
-      lead.first_name, lead.last_name,
-      lead.company, lead.title,
-      now, now,
-    );
-    if (ins.changes > 0) { added++; } else { skipped++; }
-  }
-
-  logger.info('LinkedIn search import complete', { campaign_id, added, skipped, pagesScraped: result.pagesScraped });
-  return res.json({
-    added,
-    skipped,
-    total_found: result.totalFound,
-    pages_scraped: result.pagesScraped,
-    errors: result.errors.length,
-    error_details: result.errors,
+router.post('/import-linkedin-search', (_req: Request, res: Response) => {
+  return res.status(501).json({
+    error: 'Server-side scraping was removed. Import leads from the extension popup (Search / Batch search) instead.',
   });
+});
+
+// GET /api/leads/:id/events — append-only event history for a lead
+router.get('/:id/events', (req: Request, res: Response) => {
+  const lead = db.prepare('SELECT id FROM leads WHERE id = ?').get(req.params.id) as { id: string } | undefined;
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const events = getLeadEvents(req.params.id, 200).map(e => ({
+    ...e,
+    metadata: e.metadata ? JSON.parse(e.metadata) : null,
+  }));
+  return res.json(events);
 });
 
 // POST /api/leads/:id/discover-email — trigger async email discovery

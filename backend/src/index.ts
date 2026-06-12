@@ -95,13 +95,9 @@ wss.on('error', (err) => {
 
 // Public routes — no auth required
 app.get('/api/health', (_req, res) => {
-  // first_run = true when no accounts AND no default session cookie file
-  // browser.ts saves the default session to 'linkedin.json'
-  const sessionFile = path.join(process.cwd(), '..', 'data', 'sessions', 'linkedin.json');
-  const hasSession = fs.existsSync(sessionFile);
+  // Extension-only: first_run = true when no accounts exist yet.
   const accountCount = (db.prepare('SELECT COUNT(*) as c FROM accounts').get() as { c: number }).c;
-  logger.debug('Health check', { accountCount, hasSession, first_run: accountCount === 0 && !hasSession });
-  res.json({ status: 'ok', ts: Date.now(), first_run: accountCount === 0 && !hasSession });
+  res.json({ status: 'ok', ts: Date.now(), first_run: accountCount === 0 });
 });
 
 app.use('/api/auth', authRouter);
@@ -181,29 +177,34 @@ import('./workers/inboxPoller').then(({ startInboxPoller }) => {
   logger.error('Failed to start inbox poller', { error: err instanceof Error ? err.message : String(err) });
 });
 
-// Background LinkedIn feed activity — 3× per day, 70% random chance per account slot
-// Runs at 09:00, 13:00, 17:00 UTC — makes the account look like an active human user
-cron.schedule('0 9,13,17 * * *', async () => {
-  try {
-    const { doBackgroundFeedActivity } = await import('./services/linkedin');
-    const accounts = db.prepare("SELECT id FROM accounts WHERE status = 'active'").all() as Array<{ id: string }>;
-    logger.info('Background feed activity cron fired', { activeAccounts: accounts.length });
-    for (const acc of accounts) {
-      // 70% random chance — more human-like than doing it every single time
-      if (Math.random() < 0.7) {
-        const count = Math.floor(Math.random() * 5) + 3; // 3–7 likes
-        doBackgroundFeedActivity(acc.id, count)
-          .then(liked => logger.info('Background activity done', { accountId: acc.id, liked }))
-          .catch(err => logger.warn('Background activity error', { accountId: acc.id, error: String(err) }));
-        // Stagger accounts — wait 30-90s between each
-        await new Promise(r => setTimeout(r, 30000 + Math.random() * 60000));
-      }
-    }
-  } catch (err) {
-    logger.error('Background activity cron error', { error: String(err) });
-  }
+// Periodic DB backups (daily + on startup)
+import('./services/backup').then(({ startBackupScheduler }) => {
+  startBackupScheduler();
+}).catch((err) => {
+  logger.error('Failed to start backup scheduler', { error: err instanceof Error ? err.message : String(err) });
 });
-logger.info('Background feed activity cron scheduled (09:00, 13:00, 17:00 UTC)');
+
+// ── Graceful shutdown ──────────────────────────────────────────────────────────
+// Stop accepting connections, take a final backup, then exit. We intentionally
+// do NOT db.close() here — the campaign worker's own SIGTERM handler releases its
+// DB lease on the way out, and SQLite (WAL) is durable without an explicit close.
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.warn(`Received ${signal} — shutting down gracefully`);
+  try { server.close(() => logger.info('HTTP server closed')); } catch { /* ignore */ }
+  try { wss.clients.forEach(c => c.terminate()); wss.close(); } catch { /* ignore */ }
+  try {
+    const { backupDatabase } = await import('./services/backup');
+    await backupDatabase();
+  } catch (err) {
+    logger.error('Shutdown backup failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  setTimeout(() => process.exit(0), 300);
+}
+process.once('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
+process.once('SIGINT', () => { void gracefulShutdown('SIGINT'); });
 
 // Catch unhandled promise rejections / uncaught exceptions so the process doesn't silently die
 process.on('unhandledRejection', (reason) => {

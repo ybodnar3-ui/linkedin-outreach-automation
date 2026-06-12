@@ -1,10 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../services/storage';
-import { sendReply } from '../services/inbox';
 import { classifyReply } from '../services/replyClassifier';
-import { getBrowser, getBrowserForAccount } from '../services/browser';
-import { getAccount } from '../services/accounts';
-import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -51,27 +47,13 @@ router.get('/:threadId', (req: Request, res: Response) => {
 });
 
 // POST /api/inbox/:threadId/reply
-router.post('/:threadId/reply', async (req: Request, res: Response) => {
-  const { text, account_id } = req.body;
-  if (!text) return res.status(400).json({ error: 'text required' });
-
-  try {
-    let context;
-    if (account_id) {
-      const account = getAccount(account_id);
-      if (!account) return res.status(404).json({ error: 'Account not found' });
-      context = await getBrowserForAccount(account_id, account.session_file);
-    } else {
-      context = await getBrowser();
-    }
-
-    const ok = await sendReply(account_id || '__legacy__', req.params.threadId, text, context);
-    if (!ok) return res.status(500).json({ error: 'Failed to send reply' });
-    return res.json({ ok: true });
-  } catch (err) {
-    logger.error('Failed to send reply', { threadId: req.params.threadId, error: err instanceof Error ? err.message : String(err) });
-    return res.status(500).json({ error: 'Failed to send reply' });
-  }
+// Extension-only (ADR-001): server-side Playwright replies were removed.
+// Reply-via-extension will return with the `poll_threads` work. Until then,
+// reply from LinkedIn directly.
+router.post('/:threadId/reply', (_req: Request, res: Response) => {
+  return res.status(501).json({
+    error: 'Replies via the app are temporarily unavailable in extension-only mode. Reply from LinkedIn directly — extension reply support is coming next.',
+  });
 });
 
 export default router;

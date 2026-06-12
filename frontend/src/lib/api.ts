@@ -3,6 +3,7 @@ import axios from 'axios';
 export const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  timeout: 30_000, // don't let requests hang forever (e.g. slow imports)
 });
 
 api.interceptors.request.use((config) => {
@@ -64,6 +65,7 @@ export const analyticsApi = {
   daily: (days?: number) => api.get('/analytics/daily', { params: { days } }).then(r => r.data),
   campaign: (id: string) => api.get(`/analytics/campaign/${id}`).then(r => r.data),
   campaignsSummary: () => api.get('/analytics/campaigns-summary').then(r => r.data),
+  health: () => api.get('/analytics/health').then(r => r.data),
 };
 
 // Settings

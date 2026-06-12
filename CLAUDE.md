@@ -1,14 +1,27 @@
 # LinkedIn Outreach Automation — Project Guide
 
-> Self-hosted аналог Dripify: Playwright-автоматизація LinkedIn з антидетект системою і React дашбордом.
+> Self-hosted аналог Dripify: автоматизація LinkedIn через **Chrome-розширення** (реальний браузер юзера) з React дашбордом.
+
+---
+
+## ⚠️ ARCHITECTURE REALITY (оновлено 2026-06-09, див. `.planning/decisions/ADR-001`)
+
+**Розділи нижче місцями описують СТАРИЙ дизайн (серверний headless Playwright). Це більше не актуально.**
+
+- **Виконавчий рушій — Chrome Extension** (`extension/`): працює в реальному браузері юзера (residential IP, жива сесія), виконує всі дії на LinkedIn. Найбезпечніший спосіб і єдиний, що реально працює.
+- **Серверний headless Playwright — ВИДАЛЕНО** (ADR-001, Phase 1). Видалено `browser.ts`, `linkedin.ts`, скрейпери, `data/sessions/`; Playwright прибрано з `package.json` і Dockerfile. Datacenter-IP + headless = головний вектор бану, суперечив цілі «без бана».
+- **Backend** = сервер координації + стан (SQLite) + дашборд + черга задач (`extension_tasks`). НЕ браузерна ферма.
+- **Потік:** worker (cron 5хв) кладе задачі в `extension_tasks` → розширення поллить кожні 30с → виконує на LinkedIn → репортить результат → worker просуває крок ліда.
+- **Worker — синглтон з cross-process lease-локом** (`worker_lock`): два процеси НІКОЛИ не виконують дії одночасно (= захист від подвійних дій = бана).
+- **Чесна ціль:** не «закрий Mac», а «працює поки відкритий Chrome; backend у хмарі 24/7; дії — через реальний браузер».
 
 ---
 
 ## What This Is
 
-Платформа для автоматизації LinkedIn-аутрічу. Запускає кампанії 24/7: відвідування профілю → connection request → повідомлення. Захищається від бану через імітацію людської поведінки. Керується через веб-дашборд.
+Платформа для автоматизації LinkedIn-аутрічу. Запускає кампанії: відвідування профілю → connection request → повідомлення. Захищається від бану, бо діє через реальний браузер юзера. Керується через веб-дашборд.
 
-**Не плутати з:** LinkedIn API (офіційного немає) — все через Playwright browser automation.
+**Не плутати з:** LinkedIn API (офіційного немає) — все через browser automation у Chrome-розширенні.
 
 ---
 
@@ -81,13 +94,13 @@ linkedin-automation/
 |------------|--------|--------|
 | Node.js + TypeScript | 20 LTS | Основа |
 | Express.js | 4.x | REST API |
-| Playwright (Chromium) | 1.44+ | LinkedIn browser automation |
-| better-sqlite3 | latest | Локальна БД (sync API, простий деплой) |
-| node-cron | latest | Campaign worker scheduler (кожні 5 хв) |
+| ~~Playwright~~ | — | **ВИДАЛЕНО** (ADR-001). Усі дії LinkedIn — через Chrome-розширення |
+| better-sqlite3 | latest | Локальна БД (sync API). Версіоновані міграції (`schema_migrations`) + щоденні бекапи |
+| node-cron | latest | Campaign worker (5 хв) + бекапи (03:00) |
 | ws | latest | WebSocket для real-time логів |
 | winston | latest | Логування у файли + console |
-| multer | latest | CSV file upload |
-| csv-parser | latest | Парсинг CSV лідів |
+| multer + csv-parser | latest | CSV import |
+| vitest | latest | Юніт-тести чистої логіки (`npm test`) |
 
 ### Frontend
 | Технологія | Навіщо |
@@ -101,8 +114,8 @@ linkedin-automation/
 | Lucide React | Іконки |
 
 ### Infrastructure
-- **Railway** — хостинг (backend + frontend як окремі сервіси)
-- **Docker** — `mcr.microsoft.com/playwright:v1.44.0-jammy` base image (для Playwright в продакшн)
+- **Railway** — хостинг backend (координація + стан + дашборд)
+- **Docker** — `node:20-bookworm-slim` (без Chromium/Playwright; лише build-tools для better-sqlite3)
 
 ---
 
@@ -450,12 +463,14 @@ Header: назва сторінки + LinkedIn session badge
 ## Key Warnings for LLMs
 
 1. **Не змінюй SAFE_LIMITS без явної команди користувача.** 20 connections/день — це межа безпеки.
-2. **Завжди використовуй humanizer для будь-яких дій в LinkedIn.** Прямі `page.click()` без затримок = бан.
-3. **Playwright headless: true** для нормальної роботи, **false тільки** для першого логіну.
-4. **Cookies зберігаються в `data/sessions/`**, не в БД — це навмисно (легше backup).
-5. **WebSocket events** повинні надсилатися після кожної зміни статусу ліда — фронтенд залежить від цього.
-6. **Campaign worker** — синглтон, не запускати кілька інстанцій паралельно.
+2. **Усі дії на LinkedIn — через Chrome-розширення** (`extension/content.js`), НЕ через серверний Playwright. Playwright-шлях видаляється (ADR-001).
+3. **Виконання працює, лише поки відкритий Chrome юзера** з розширенням. Backend сам по собі дії на LinkedIn не виконує.
+4. **Сесія LinkedIn = жива сесія в Chrome юзера.** `data/sessions/` (cookie-файли Playwright) — legacy, видаляється разом з Playwright.
+5. **WebSocket events** надсилаються після кожної зміни статусу ліда — фронтенд залежить від цього.
+6. **Campaign worker** — синглтон. Захищений in-process прапором + cross-process lease-локом (`worker_lock` у БД). Два інстанси не виконають дії одночасно, але все одно не запускай кілька навмисно.
 7. **better-sqlite3 — синхронний API** — не потрібен `await`. Не плутай з `sqlite3` (async).
+8. **Після зміни `extension/*.js` — перезавантаж розширення** в `chrome://extensions` (інакше старий код).
+9. **Backend dev = `npm run dev` (`tsx watch`).** Якщо запущений як голий `tsx` без watch — правки коду НЕ застосовуються до рестарту.
 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project

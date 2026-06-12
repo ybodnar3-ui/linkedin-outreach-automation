@@ -28,7 +28,12 @@ function addColumnIfNotExists(table: string, column: string, definition: string)
   }
 }
 
-export function initDb(): void {
+/**
+ * Migration v1 (baseline): the full current schema, expressed idempotently
+ * (CREATE TABLE IF NOT EXISTS + addColumnIfNotExists). Safe to run on a fresh
+ * DB (builds everything) or an existing one (no-ops). Recorded as version 1.
+ */
+function applyBaselineSchema(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id TEXT PRIMARY KEY,
@@ -170,6 +175,24 @@ export function initDb(): void {
   addColumnIfNotExists('leads', 'crm_notes', 'TEXT');
   addColumnIfNotExists('leads', 'crm_next_follow_up', 'INTEGER');
 
+  // Reliability: consecutive-failure counter for retry/backoff/dead-letter.
+  addColumnIfNotExists('leads', 'fail_count', 'INTEGER NOT NULL DEFAULT 0');
+
+  // Per-lead append-only event log (observability without SQLite surgery).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lead_events (
+      id TEXT PRIMARY KEY,
+      lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      campaign_id TEXT,
+      type TEXT NOT NULL,
+      message TEXT,
+      metadata TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_lead_events_lead ON lead_events(lead_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_lead_events_type ON lead_events(type, created_at);
+  `);
+
   // Webhooks
   db.exec(`
     CREATE TABLE IF NOT EXISTS webhooks (
@@ -244,7 +267,95 @@ export function initDb(): void {
       ON extension_tasks(account_id, status);
     CREATE INDEX IF NOT EXISTS idx_ext_tasks_lead
       ON extension_tasks(lead_id);
+
+    -- Cross-process lease lock. Guarantees only ONE process runs the campaign
+    -- worker at a time even if the backend is accidentally started twice
+    -- (two workers = double LinkedIn actions = ban risk).
+    CREATE TABLE IF NOT EXISTS worker_lock (
+      name TEXT PRIMARY KEY,
+      holder TEXT NOT NULL,
+      heartbeat_at INTEGER NOT NULL
+    );
   `);
+}
+
+// ── Versioned migrations ────────────────────────────────────────────────────────
+// Replaces ad-hoc addColumnIfNotExists-at-startup. Every schema change is an
+// ordered, recorded migration. The runner applies only versions newer than the
+// max recorded, each inside a transaction. Add NEW changes as new entries below
+// (never edit a shipped migration).
+
+interface Migration {
+  version: number;
+  name: string;
+  up: () => void;
+}
+
+const MIGRATIONS: Migration[] = [
+  { version: 1, name: 'baseline_schema', up: applyBaselineSchema },
+  // Future schema changes go here as { version: 2, name: '...', up: () => { db.exec(...) } }
+];
+
+export interface MigrationRecord { version: number; name: string; applied_at: number; }
+
+/** Apply any migrations newer than the recorded version. Idempotent. */
+export function runMigrations(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+  `);
+  const current = (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number | null }).v ?? 0;
+  const pending = MIGRATIONS.filter(m => m.version > current).sort((a, b) => a.version - b.version);
+
+  for (const m of pending) {
+    const apply = db.transaction(() => {
+      m.up();
+      db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
+        .run(m.version, m.name, Math.floor(Date.now() / 1000));
+    });
+    apply();
+  }
+}
+
+/** Migration history (for /health or ops introspection). */
+export function getMigrations(): MigrationRecord[] {
+  return db.prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version').all() as MigrationRecord[];
+}
+
+/** Entry point called on startup. */
+export function initDb(): void {
+  runMigrations();
+}
+
+/**
+ * Try to acquire (or renew) a leased lock. Returns true if THIS holder owns it.
+ *
+ * The lease is stolen only if the current holder's heartbeat is older than
+ * `ttlSeconds` (i.e. the previous owner died). The holder must call this again
+ * each cycle to renew its heartbeat. Atomic via a single conditional UPSERT.
+ */
+export function acquireWorkerLease(name: string, holder: string, ttlSeconds: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    INSERT INTO worker_lock (name, holder, heartbeat_at)
+    VALUES (@name, @holder, @now)
+    ON CONFLICT(name) DO UPDATE SET
+      holder = @holder,
+      heartbeat_at = @now
+    WHERE worker_lock.holder = @holder
+       OR worker_lock.heartbeat_at < @now - @ttl
+  `).run({ name, holder, now, ttl: ttlSeconds });
+
+  const row = db.prepare('SELECT holder FROM worker_lock WHERE name = ?').get(name) as { holder: string } | undefined;
+  return row?.holder === holder;
+}
+
+/** Release a leased lock if held by this holder (best-effort, e.g. on shutdown). */
+export function releaseWorkerLease(name: string, holder: string): void {
+  db.prepare('DELETE FROM worker_lock WHERE name = ? AND holder = ?').run(name, holder);
 }
 
 export function getTodayTracker(): { connections_sent: number; messages_sent: number; profiles_visited: number } {

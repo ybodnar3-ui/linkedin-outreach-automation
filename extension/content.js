@@ -122,7 +122,9 @@ async function executeAction(action, payload) {
       case 'visit_profile':    return await visitProfile();
       case 'send_connection':  return await sendConnection(payload.note);
       case 'send_message':     return await sendMessage(payload.messageText);
+      case 'fill_message':     return await fillMessageComposer(payload.messageText);
       case 'check_connection': return await checkConnection();
+      case 'poll_threads':     return await pollThreads();
       case 'follow_profile':   return await followProfile();
       default:
         return { success: false, error: `Unknown action: ${action}` };
@@ -164,6 +166,24 @@ function sleep(ms) {
  * Find any clickable element whose visible text or aria-label matches.
  * Uses querySelectorAll('*') to handle LinkedIn's non-standard HTML structures.
  */
+/**
+ * Self-test: on a profile page the top-card action area should exist with at
+ * least one recognizable control. If NOTHING is present, LinkedIn's DOM likely
+ * changed (or the page didn't load). Returning this as `dom_broken` lets the
+ * backend raise a "selectors need updating" alert instead of silently failing
+ * and eventually dead-lettering an otherwise-fine lead.
+ */
+function profileStructureBroken() {
+  if (!/\/in\//.test(location.pathname)) return false; // only meaningful on profiles
+  const hasActionArea = document.querySelector(
+    '.pvs-profile-actions, .pv-top-card-v2-ctas, .pv-top-card, [class*="profile-actions"]',
+  );
+  const hasAnyControl = findButton('Connect') || findButton('Message') ||
+    findButton('Follow') || findButton('More') || findButton('Pending') ||
+    document.querySelector('button[aria-label], a[aria-label][href*="/in/"]');
+  return !hasActionArea && !hasAnyControl;
+}
+
 function findButton(text) {
   const lowerText = text.toLowerCase();
   const all = document.querySelectorAll('*');
@@ -219,30 +239,91 @@ async function visitProfile() {
   return { success: true };
 }
 
-async function checkConnection() {
-  await sleep(1500);
-
-  // "Message" button = connected
-  if (findButton('Message')) {
-    return { success: true, connection_status: 'connected' };
+/**
+ * Scrape the LinkedIn messaging conversation list (runs on /messaging/).
+ * Returns recent threads with the participant name, last-message snippet, and
+ * whether the LAST message was inbound (theirs) vs ours ("You: …"). The backend
+ * matches inbound threads to messaged leads and marks them replied.
+ */
+async function pollThreads() {
+  // Wait for the conversation list to render.
+  let list = null;
+  for (let i = 0; i < 14; i++) {
+    list = document.querySelector('.msg-conversations-container__conversations-list') ||
+           document.querySelector('[class*="conversations-list"]');
+    if (list && list.querySelector('li')) break;
+    await sleep(700);
   }
 
-  // Pending state — various LinkedIn labels
-  const bodyText = document.body.innerText;
+  const cards = Array.from(document.querySelectorAll(
+    '.msg-conversation-listitem, .msg-conversation-card, li[class*="conversation-listitem"]',
+  )).slice(0, 30);
+
+  const pick = (card, sels) => {
+    for (const s of sels) {
+      const el = card.querySelector(s);
+      const t = (el?.innerText || '').replace(/\s+/g, ' ').trim();
+      if (t) return t;
+    }
+    return '';
+  };
+
+  const threads = [];
+  for (const card of cards) {
+    const name = pick(card, [
+      '.msg-conversation-listitem__participant-names',
+      '.msg-conversation-card__participant-names',
+      '[class*="participant-names"]',
+    ]);
+    if (!name) continue;
+    const snippet = pick(card, [
+      '.msg-conversation-card__message-snippet',
+      '[class*="message-snippet"]',
+    ]);
+    const time = pick(card, ['time', '[class*="time-stamp"]']);
+    const unread = !!card.querySelector('[class*="unread"], .notification-badge--show, [class*="--unread"]');
+    // "You: …" snippet means OUR message is last → not an inbound reply.
+    const isInbound = !!snippet && !/^you:\s/i.test(snippet);
+    threads.push({ name, snippet: snippet.slice(0, 300), time, unread, isInbound });
+  }
+
+  return { success: true, threads };
+}
+
+async function checkConnection() {
+  await sleep(1500);
+  const bodyText = document.body.innerText || '';
+
+  // IMPORTANT: a "Message" button is NOT proof of connection — LinkedIn shows it
+  // on out-of-network profiles too (it opens the paid InMail / Premium upsell).
+  // Using it as the signal caused FALSE POSITIVES: leads were marked connected
+  // while still only pending, then messaging hit the Premium wall and failed.
+  // The reliable signal is the network-distance badge ("1st" / "2nd" / "3rd").
+
+  // 1) Pending — we sent an invite that hasn't been accepted yet.
   if (
     findButton('Pending') ||
-    document.querySelector('[aria-label*="Pending"]') ||
-    bodyText.includes('Invitation sent') ||
-    bodyText.includes('pending')
+    findButton('Withdraw') ||
+    document.querySelector('[aria-label*="Pending" i]') ||
+    /Invitation sent|Pending\b/i.test(bodyText)
   ) {
     return { success: true, connection_status: 'pending' };
   }
 
-  // Connect button = not yet connected
-  if (findButton('Connect')) {
+  // 2) Distance badge: "· 1st" / "1st degree" = genuine 1st-degree connection.
+  const is1st = /·\s*1st\b/i.test(bodyText) || /\b1st\s+degree\b/i.test(bodyText);
+  const is2ndOr3rd = /·\s*(2nd|3rd)\b/i.test(bodyText) || /\b(2nd|3rd)\s+degree\b/i.test(bodyText);
+
+  if (is1st && !is2ndOr3rd) {
+    return { success: true, connection_status: 'connected' };
+  }
+
+  // 3) Connect button or an out-of-network badge = not connected yet.
+  if (findButton('Connect') || is2ndOr3rd) {
     return { success: true, connection_status: 'not_connected' };
   }
 
+  // 4) Ambiguous — do NOT assume connected (that was the original bug).
   return { success: true, connection_status: 'unknown' };
 }
 
@@ -345,7 +426,7 @@ async function sendConnection(note) {
       .filter(t => t.length > 0 && t.length < 40)
       .slice(0, 20)
       .join(' | ');
-    return { success: false, error: `Connect button not found. Buttons: ${btnsFound}` };
+    return { success: false, error: `Connect button not found. Buttons: ${btnsFound}`, dom_broken: profileStructureBroken() };
   }
 
   // Click the Connect button
@@ -486,86 +567,144 @@ function findButtonLoose(text) {
 async function sendMessage(messageText) {
   if (!messageText) return { success: false, error: 'No message text provided' };
 
-  // Find Message button using the same broad search as findConnectButton
-  const messageBtn = findButton('Message') ||
-    Array.from(document.querySelectorAll('*')).find(el => {
-      const tag = el.tagName.toLowerCase();
-      if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') return false;
-      const label = (el.getAttribute('aria-label') || '').toLowerCase();
-      return label.startsWith('message') || (el.innerText || '').trim().toLowerCase() === 'message';
-    });
+  // Prefer the profile-actions Message BUTTON (opens an in-page chat overlay that
+  // stays on the profile — the content script remains alive and the composer
+  // mounts reliably) over any <a> link to /messaging/thread/new (a navigation
+  // whose standalone composer frequently fails to mount → "Compose box not found").
+  const findMessageButtonIn = (root) => {
+    if (!root) return null;
+    for (const el of root.querySelectorAll('button, [role="button"]')) {
+      const label = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+      const inner = (el.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (label === 'message' || label.startsWith('message ') || inner === 'message') {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return el;
+      }
+    }
+    return null;
+  };
+
+  const actionBars = [
+    document.querySelector('.pvs-profile-actions'),
+    document.querySelector('.pv-top-card-v2-ctas'),
+    document.querySelector('.ph5.pb5'),
+    document.querySelector('main'),
+  ];
+
+  let messageBtn = null;
+  for (const bar of actionBars) {
+    messageBtn = findMessageButtonIn(bar);
+    if (messageBtn) break;
+  }
+  // Last resort: broad search (may match an <a> link)
+  if (!messageBtn) {
+    messageBtn = findButton('Message') ||
+      Array.from(document.querySelectorAll('*')).find(el => {
+        const tag = el.tagName.toLowerCase();
+        if (tag !== 'button' && tag !== 'a' && el.getAttribute('role') !== 'button') return false;
+        const label = (el.getAttribute('aria-label') || '').toLowerCase();
+        return label.startsWith('message') || (el.innerText || '').trim().toLowerCase() === 'message';
+      });
+  }
 
   if (!messageBtn) {
-    return { success: false, error: 'Message button not found — lead may not be connected' };
+    return { success: false, error: 'Message button not found — lead may not be connected', dom_broken: profileStructureBroken() };
   }
   messageBtn.click();
 
-  // Wait for the compose box to appear — LinkedIn 2024/2025 opens a chat overlay
-  // at the bottom of the page with various possible selectors
-  let msgBox = null;
-  for (let i = 0; i < 15; i++) {
-    await sleep(600);
-    msgBox = document.querySelector('.msg-form__contenteditable') ||
-             document.querySelector('[data-placeholder="Write a message…"]') ||
-             document.querySelector('[data-placeholder*="message" i]') ||
-             document.querySelector('.msg-form [contenteditable="true"]') ||
-             document.querySelector('[role="textbox"][aria-label*="message" i]') ||
-             document.querySelector('[role="textbox"][aria-label*="Message" i]') ||
-             document.querySelector('.msg-form__contenteditable[contenteditable]') ||
-             document.querySelector('[contenteditable="true"][aria-placeholder]') ||
-             document.querySelector('.msg-overlay-conversation-bubble [contenteditable="true"]') ||
-             document.querySelector('.msg-overlay-list-bubble [contenteditable="true"]') ||
-             document.querySelector('[contenteditable="true"][role="textbox"]');
-    if (msgBox) break;
+  // Two-phase handling. Clicking "Message" on many profiles NAVIGATES to the
+  // standalone /messaging/thread page, which renders blank during the in-page
+  // transition (composer never mounts in this dying context → "Compose box not
+  // found"). Detect that navigation and hand off to background.js, which reloads
+  // the thread URL as a FULL page (composer mounts properly) and re-invokes
+  // 'fill_message'. If instead an in-page overlay opened (URL unchanged), fill it
+  // here directly.
+  await sleep(2500);
+  if (/\/messaging\/(thread|compose)/.test(location.href)) {
+    return { success: false, navigated_to_messaging: true, messagingUrl: location.href };
   }
 
-  if (!msgBox) {
-    // LinkedIn navigated to /messaging/thread/new/ — React renders async.
-    // Use MutationObserver to catch the compose box as soon as it appears.
-    msgBox = await new Promise((resolve) => {
-      // Already in DOM?
-      const find = () =>
-        document.querySelector('[contenteditable="true"][role="textbox"]') ||
-        document.querySelector('.msg-form__contenteditable') ||
-        document.querySelector('[data-placeholder*="message" i]') ||
-        document.querySelector('[aria-label*="message" i][contenteditable]') ||
-        document.querySelector('[contenteditable="true"]');
-      const existing = find();
-      if (existing) { resolve(existing); return; }
+  return await fillMessageComposer(messageText);
+}
 
+/**
+ * Finds the message composer on the CURRENT page (overlay bubble OR a fully
+ * loaded standalone /messaging/ page), types the text, and clicks Send.
+ * Used both by sendMessage (overlay path) and by the 'fill_message' action
+ * (after background.js reloads the standalone thread page fresh).
+ */
+async function fillMessageComposer(messageText) {
+  if (!messageText) return { success: false, error: 'No message text provided' };
+
+  const findBox = () =>
+    document.querySelector('.msg-form__contenteditable') ||
+    document.querySelector('[data-placeholder="Write a message…"]') ||
+    document.querySelector('[data-placeholder*="message" i]') ||
+    document.querySelector('.msg-form [contenteditable="true"]') ||
+    document.querySelector('[role="textbox"][aria-label*="message" i]') ||
+    document.querySelector('[contenteditable="true"][aria-placeholder]') ||
+    document.querySelector('.msg-overlay-conversation-bubble [contenteditable="true"]') ||
+    document.querySelector('.msg-form textarea') ||
+    document.querySelector('[contenteditable="true"][role="textbox"]') ||
+    document.querySelector('[contenteditable="true"]');
+
+  // Poll up to ~30s — the standalone messaging app can take several seconds to
+  // mount its React composer after a fresh page load.
+  let msgBox = null;
+  for (let i = 0; i < 10; i++) {
+    msgBox = findBox();
+    if (msgBox) break;
+    await sleep(600);
+  }
+  if (!msgBox) {
+    msgBox = await new Promise((resolve) => {
+      const existing = findBox();
+      if (existing) { resolve(existing); return; }
       const obs = new MutationObserver(() => {
-        const el = find();
+        const el = findBox();
         if (el) { obs.disconnect(); clearTimeout(timer); resolve(el); }
       });
-      obs.observe(document.body, { childList: true, subtree: true });
-      const timer = setTimeout(() => { obs.disconnect(); resolve(null); }, 15000);
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      const timer = setTimeout(() => { obs.disconnect(); resolve(null); }, 25000);
     });
   }
 
   if (!msgBox) {
-    const editables = Array.from(document.querySelectorAll('[contenteditable], [role="textbox"]'))
-      .map(el => el.tagName + '.' + (el.className || '').split(' ').slice(0,2).join('.'))
-      .slice(0, 5).join(' | ');
+    const bodyText = (document.body.innerText || '');
+    // Premium / InMail upsell wall = the recipient is NOT a free 1st-degree
+    // connection. Report this distinctly so the backend stops treating the lead
+    // as connected and re-checks acceptance instead of retrying messaging forever.
+    if (/With Premium, you can message anyone|Message in Sales Nav|unlock and message|Try Premium|send an InMail/i.test(bodyText)) {
+      return {
+        success: false,
+        not_connected: true,
+        error: 'not_connected: LinkedIn shows the Premium/InMail wall — recipient is not an accepted 1st-degree connection',
+      };
+    }
+    const dump = (() => {
+      try {
+        const ed = Array.from(document.querySelectorAll('[contenteditable],[role="textbox"],textarea'))
+          .slice(0, 8)
+          .map(e => `${e.tagName}.${String(e.className || '').slice(0, 40)}|ce=${e.getAttribute('contenteditable')}|ph=${e.getAttribute('aria-placeholder') || e.getAttribute('data-placeholder') || ''}`);
+        const body = bodyText.replace(/\s+/g, ' ').slice(0, 200);
+        return `ED(${ed.length})=[${ed.join(' ## ')}] BODY="${body}"`;
+      } catch (e) { return `dump-error:${e.message}`; }
+    })();
     const url = window.location.href.replace(/^https:\/\/www\.linkedin\.com/, '');
-    return { success: false, error: `Compose box not found. URL: ${url} | editables: ${editables}` };
+    return { success: false, error: `Compose box not found. URL: ${url} | ${dump}` };
   }
 
-  // Type the message — use clipboard paste approach (most reliable for contenteditable)
+  // Type the message via clipboard paste (most reliable for contenteditable).
   msgBox.focus();
   msgBox.click();
   await sleep(300);
-
-  // Clear existing content
   msgBox.innerHTML = '';
   msgBox.textContent = '';
-
-  // Insert text via DataTransfer (same approach as note in sendConnection)
   try {
     const dt = new DataTransfer();
     dt.setData('text/plain', messageText);
     msgBox.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   } catch {
-    // Fallback: execCommand
     msgBox.focus();
     document.execCommand('selectAll', false);
     document.execCommand('insertText', false, messageText);
@@ -574,13 +713,12 @@ async function sendMessage(messageText) {
   msgBox.dispatchEvent(new Event('change', { bubbles: true }));
   await sleep(800);
 
-  // Find and click Send — scoped to the message overlay/form
+  // Find and click Send — scoped to the composer's form/overlay.
   const msgContainer = msgBox.closest('[class*="msg-form"], [class*="overlay"], [class*="compose"]') || document;
   const sendBtn = msgContainer.querySelector('[class*="send-button"]') ||
                   msgContainer.querySelector('button[type="submit"]') ||
                   msgContainer.querySelector('[aria-label*="Send" i]') ||
                   (() => {
-                    // Walk all buttons in container, find one with text Send
                     for (const el of msgContainer.querySelectorAll('button, [role="button"]')) {
                       const t = (el.getAttribute('aria-label') || el.innerText || '').trim().toLowerCase();
                       if (t === 'send' || t.startsWith('send message')) return el;
@@ -593,8 +731,13 @@ async function sendMessage(messageText) {
     await sleep(1500);
     return { success: true, sent: true };
   }
-
-  // Debug: list buttons in the overlay
+  // Composer is filled but no Send button — try Enter to submit as a fallback.
+  msgBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+  await sleep(1500);
+  // Heuristic: if the box cleared, the message likely sent.
+  if ((msgBox.innerText || '').trim().length === 0) {
+    return { success: true, sent: true };
+  }
   const visibleBtns = Array.from(msgContainer.querySelectorAll('button, [role="button"]'))
     .map(b => (b.getAttribute('aria-label') || b.innerText || '').trim())
     .filter(t => t.length > 0 && t.length < 40).slice(0, 10).join(' | ');

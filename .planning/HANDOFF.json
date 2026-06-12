@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-28T06:43:17.338Z",
+  "timestamp": "2026-06-12T19:04:03.188Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -18,7 +18,35 @@
   "uncommitted_files": [
     {
       "status": "M",
+      "path": ".DS_Store"
+    },
+    {
+      "status": "M",
       "path": ".planning/HANDOFF.json"
+    },
+    {
+      "status": "M",
+      "path": "CLAUDE.md"
+    },
+    {
+      "status": "M",
+      "path": "Dockerfile"
+    },
+    {
+      "status": "M",
+      "path": "backend/package.json"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/index.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/routes/accounts.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/routes/analytics.ts"
     },
     {
       "status": "M",
@@ -26,7 +54,55 @@
     },
     {
       "status": "M",
-      "path": "backend/src/utils/delays.ts"
+      "path": "backend/src/routes/inbox.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/routes/leads.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/routes/settings.ts"
+    },
+    {
+      "status": "D",
+      "path": "backend/src/services/browser.ts"
+    },
+    {
+      "status": "D",
+      "path": "backend/src/services/inbox.ts"
+    },
+    {
+      "status": "D",
+      "path": "backend/src/services/linkedin.ts"
+    },
+    {
+      "status": "D",
+      "path": "backend/src/services/linkedinScraper.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/services/profileEnricher.ts"
+    },
+    {
+      "status": "D",
+      "path": "backend/src/services/salesNavScraper.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/services/storage.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/utils/humanizer.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/workers/campaignWorker.ts"
+    },
+    {
+      "status": "M",
+      "path": "backend/src/workers/inboxPoller.ts"
     },
     {
       "status": "M",
@@ -38,29 +114,45 @@
     },
     {
       "status": "M",
-      "path": "extension/manifest.json"
+      "path": "frontend/src/lib/api.ts"
     },
     {
       "status": "M",
-      "path": "extension/popup.html"
+      "path": "frontend/src/pages/DashboardPage.tsx"
     },
     {
       "status": "M",
-      "path": "extension/popup.js"
+      "path": "package-lock.json"
     },
     {
       "status": "??",
-      "path": ".DS_Store"
+      "path": ".planning/decisions/"
     },
     {
       "status": "??",
-      "path": ".github/"
+      "path": "SECURITY.md"
     },
     {
       "status": "??",
-      "path": "extension/interceptor.js"
+      "path": "backend/src/services/backup.ts"
+    },
+    {
+      "status": "??",
+      "path": "backend/src/services/events.ts"
+    },
+    {
+      "status": "??",
+      "path": "backend/src/utils/retry.test.ts"
+    },
+    {
+      "status": "??",
+      "path": "backend/src/utils/retry.ts"
+    },
+    {
+      "status": "??",
+      "path": "data/"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\nfea50f6 fix: seed extension token at DB init so ping works on first request\n92994c7 fix: seed default extension token so extension can connect immediately\n0c25ef7 fix: expose extension_token via settings API for easy retrieval\n6e1aaf8 feat: Chrome Extension for LinkedIn automation (Dripify-style)\nb8e217c fix: rewrite LinkedIn search scraper to be layout-agnostic"
+  "context_notes": "Recent commits:\n545cbee fix: sendMessage waits for compose box via MutationObserver (15s)\n74eb451 fix: sendMessage debug URL + session path fix\nf3aee68 fix: downgrade WS rejection log to debug (reduces noise on localhost) Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nba1b15d fix: sendMessage — modern LinkedIn chat overlay selectors\n9264e0d harden: allowlist tracker field names before SQL interpolation"
 }

@@ -29,6 +29,7 @@ export function DashboardPage() {
   const { data: daily } = useQuery({ queryKey: ['analytics', 'daily', 7], queryFn: () => analyticsApi.daily(7) });
   const { data: session } = useQuery({ queryKey: ['settings', 'session'], queryFn: settingsApi.session, refetchInterval: 60_000 });
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: accountsApi.list });
+  const { data: health } = useQuery({ queryKey: ['analytics', 'health'], queryFn: analyticsApi.health, refetchInterval: 30_000 });
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -65,6 +66,15 @@ export function DashboardPage() {
 
   const sessionActive = session?.active;
 
+  const extActive = health?.extension?.active;
+  const extLastSeen = health?.extension?.last_seen as number | null | undefined;
+  const lastSeenAgo = extLastSeen ? Math.max(0, Math.floor(Date.now() / 1000) - extLastSeen) : null;
+  const agoLabel = lastSeenAgo == null ? 'never'
+    : lastSeenAgo < 90 ? `${lastSeenAgo}s ago`
+    : lastSeenAgo < 3600 ? `${Math.floor(lastSeenAgo / 60)}m ago`
+    : `${Math.floor(lastSeenAgo / 3600)}h ago`;
+  const healthIssue = health && health.status !== 'ok' && health.status !== 'extension_offline';
+
   return (
     <div className="space-y-6">
       {showWizard && <OnboardingWizard onDismiss={handleDismiss} />}
@@ -75,6 +85,22 @@ export function DashboardPage() {
             {sessionActive ? <Wifi size={14} /> : <WifiOff size={14} />}
             <span className="hidden sm:inline">LinkedIn </span>{sessionActive ? 'Connected' : 'Disconnected'}
           </span>
+          <span
+            title={`Extension last seen: ${agoLabel}`}
+            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1 rounded-full ${extActive ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}
+          >
+            {extActive ? <Wifi size={14} /> : <WifiOff size={14} />}
+            Extension {extActive ? `live · ${agoLabel}` : 'offline'}
+          </span>
+          {healthIssue && (
+            <span
+              title={`Dead-lettered: ${health?.dead_lettered ?? 0} · failures 24h: ${health?.failures_24h ?? 0} · warnings 24h: ${health?.warnings_24h ?? 0}`}
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1 rounded-full bg-red-50 text-red-600"
+            >
+              <OctagonX size={14} />
+              {health?.status === 'warning' ? 'LinkedIn warning' : 'Degraded'}
+            </span>
+          )}
           <button
             onClick={() => campaignsApi.pauseAll()}
             className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"

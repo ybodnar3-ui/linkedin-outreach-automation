@@ -228,13 +228,28 @@ async function processTask(task, apiUrl, apiToken) {
 
     await navigateTab(tabId, profileUrl);
 
-    const result = await sendToContentScript(tabId, {
+    let result = await sendToContentScript(tabId, {
       type: 'LI_OUTREACH_EXECUTE',
       action: task.action,
       payload: task.payload,
     });
 
     if (!result) throw new Error('No response from content script');
+
+    // Two-phase messaging: if clicking "Message" navigated to the standalone
+    // /messaging/thread page (which renders blank during the in-page transition),
+    // reload that thread URL as a FULL page so the composer mounts, then fill it.
+    if (task.action === 'send_message' && result.navigated_to_messaging && result.messagingUrl) {
+      console.log('[LI Outreach] Messaging navigation detected — reloading thread fresh:', result.messagingUrl);
+      await navigateTab(tabId, result.messagingUrl);
+      await sleep(2000);
+      const filled = await sendToContentScript(tabId, {
+        type: 'LI_OUTREACH_EXECUTE',
+        action: 'fill_message',
+        payload: { messageText: task.payload.messageText },
+      });
+      result = filled || { success: false, error: 'No response from content script (fill_message)' };
+    }
 
     if (result.success) {
       await reportResult(apiUrl, apiToken, task.id, 'done', result, null);
@@ -1406,6 +1421,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // ── Main polling loop ─────────────────────────────────────────────────────────
 
+// Inbox reply-detection: scrape the messaging list every ~15 min (30 ticks at
+// 30s) when no task is pending, and POST inbound threads to the backend.
+let inboxPollCounter = 0;
+const INBOX_POLL_EVERY_TICKS = 30;
+
+async function pollInbox(apiUrl, apiToken, accountId) {
+  try {
+    const tabId = await getOrCreateLinkedInTab();
+    await navigateTab(tabId, 'https://www.linkedin.com/messaging/');
+    const result = await sendToContentScript(tabId, {
+      type: 'LI_OUTREACH_EXECUTE',
+      action: 'poll_threads',
+      payload: {},
+    });
+    if (result && result.success && Array.isArray(result.threads)) {
+      const resp = await apiFetch(apiUrl, apiToken, '/api/extension/inbox', {
+        method: 'POST',
+        body: JSON.stringify({ account_id: accountId, threads: result.threads }),
+      });
+      console.log('[LI Outreach] Inbox polled:', result.threads.length, 'threads,', resp?.replies ?? 0, 'replies');
+    }
+  } catch (e) {
+    console.warn('[LI Outreach] Inbox poll failed:', e.message);
+  }
+}
+
 async function tick() {
   const { apiUrl, apiToken, accountId } = await getConfig();
 
@@ -1427,6 +1468,19 @@ async function tick() {
       isProcessing = true;
       try {
         await processTask(data.task, apiUrl, apiToken);
+      } finally {
+        isProcessing = false;
+      }
+      return;
+    }
+
+    // No task pending — periodically scrape the inbox for replies.
+    inboxPollCounter++;
+    if (inboxPollCounter >= INBOX_POLL_EVERY_TICKS) {
+      inboxPollCounter = 0;
+      isProcessing = true;
+      try {
+        await pollInbox(apiUrl, apiToken, accountId);
       } finally {
         isProcessing = false;
       }

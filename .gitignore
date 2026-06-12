@@ -4,6 +4,8 @@ data/database.sqlite*
 data/sessions/
 data/uploads/
 data/logs/
+data/backups/
+.DS_Store
 *.log
 .env
 .env.*

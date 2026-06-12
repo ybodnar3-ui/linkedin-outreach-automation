@@ -61,4 +61,39 @@ router.get('/campaigns-summary', (_req: Request, res: Response) => {
   return res.json(rows);
 });
 
+// GET /api/analytics/health — operational health for "is the machine OK?"
+// Surfaces dead-letters, recent failures/warnings, retrying leads, and whether
+// the extension is alive — so an operator can spot trouble without SQLite surgery.
+router.get('/health', (_req: Request, res: Response) => {
+  const now = Math.floor(Date.now() / 1000);
+  const dayAgo = now - 86400;
+
+  const statusCounts = db.prepare('SELECT status, COUNT(*) AS n FROM leads GROUP BY status')
+    .all() as Array<{ status: string; n: number }>;
+  const deadLettered = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE status = 'error' AND skip_reason = 'max_retries'").get() as { n: number };
+  const retrying = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE fail_count > 0 AND status = 'pending'").get() as { n: number };
+  const failures24h = db.prepare("SELECT COUNT(*) AS n FROM lead_events WHERE type IN ('failed','dead_lettered') AND created_at >= ?").get(dayAgo) as { n: number };
+  const warnings24h = db.prepare("SELECT COUNT(*) AS n FROM lead_events WHERE type = 'warning' AND created_at >= ?").get(dayAgo) as { n: number };
+  const lastActivity = db.prepare('SELECT MAX(created_at) AS ts FROM lead_events').get() as { ts: number | null };
+  const extLastSeen = db.prepare("SELECT MAX(CAST(value AS INTEGER)) AS ts FROM app_settings WHERE key LIKE 'ext_last_seen_%'").get() as { ts: number | null };
+  const pausedCampaigns = db.prepare("SELECT COUNT(*) AS n FROM campaigns WHERE status = 'paused'").get() as { n: number };
+
+  const extensionActive = !!extLastSeen.ts && extLastSeen.ts >= now - 300;
+
+  return res.json({
+    extension: { active: extensionActive, last_seen: extLastSeen.ts },
+    leads_by_status: statusCounts.reduce((acc, r) => { acc[r.status] = r.n; return acc; }, {} as Record<string, number>),
+    dead_lettered: deadLettered.n,
+    retrying: retrying.n,
+    failures_24h: failures24h.n,
+    warnings_24h: warnings24h.n,
+    paused_campaigns: pausedCampaigns.n,
+    last_activity: lastActivity.ts,
+    status: !extensionActive ? 'extension_offline'
+      : warnings24h.n > 0 ? 'warning'
+      : failures24h.n > 10 ? 'degraded'
+      : 'ok',
+  });
+});
+
 export default router;

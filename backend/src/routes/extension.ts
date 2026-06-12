@@ -18,6 +18,8 @@ import { broadcastLog } from '../index';
 import { fireWebhookEvent } from '../services/webhookService';
 import { syncLeadToCrm } from '../services/crmSync';
 import { incrementAccountTracker } from '../services/accountHealth';
+import { recordLeadEvent } from '../services/events';
+import { nextFailureAction } from '../utils/retry';
 
 const router = Router();
 
@@ -199,26 +201,133 @@ router.post('/result', (req: Request, res: Response) => {
     const isWarning = (result as { warning?: boolean } | undefined)?.warning === true ||
       (error_message ?? '').startsWith('LinkedIn warning:');
 
+    // The recipient turned out NOT to be an accepted 1st-degree connection
+    // (extension hit the Premium/InMail wall). A prior check_connection probe
+    // false-positived. Clear connected_at and send the lead back to awaiting
+    // acceptance so we re-verify instead of retrying messaging against the wall.
+    const notConnected = (result as { not_connected?: boolean } | undefined)?.not_connected === true;
+
+    // Systemic selector breakage reported by content.js — NOT a lead-specific
+    // failure, so it must not count toward dead-lettering (it would kill every
+    // lead). Alert loudly and retry soon.
+    const domBroken = (result as { dom_broken?: boolean } | undefined)?.dom_broken === true;
+
+    const leadIdStr = task.lead_id as string;
+    const leadRow = db.prepare('SELECT campaign_id, fail_count FROM leads WHERE id = ?')
+      .get(task.lead_id) as { campaign_id?: string; fail_count?: number } | undefined;
+
     if (isWarning) {
       // Pause the campaign this lead belongs to and alert via WebSocket
-      const lead = db.prepare('SELECT campaign_id FROM leads WHERE id = ?').get(task.lead_id) as { campaign_id?: string } | undefined;
-      if (lead?.campaign_id) {
-        db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE id = ?").run(now, lead.campaign_id);
+      if (leadRow?.campaign_id) {
+        db.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE id = ?").run(now, leadRow.campaign_id);
       }
       // Keep the lead pending but defer 24h so we don't immediately retry the warning
       db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
         .run(now + 86400, 'pending', now, task.lead_id);
-      logger.error('LinkedIn safety warning — campaign paused', { taskId: task_id, leadId: task.lead_id, campaignId: lead?.campaign_id, error: error_message });
-      broadcastLog('warning', { warningType: error_message, leadId: task.lead_id, campaignId: lead?.campaign_id, message: 'Campaign paused due to LinkedIn safety warning' });
+      recordLeadEvent(leadIdStr, 'warning', String(error_message ?? 'LinkedIn safety warning'), { action: task.action });
+      logger.error('LinkedIn safety warning — campaign paused', { taskId: task_id, leadId: task.lead_id, campaignId: leadRow?.campaign_id, error: error_message });
+      broadcastLog('warning', { warningType: error_message, leadId: task.lead_id, campaignId: leadRow?.campaign_id, message: 'Campaign paused due to LinkedIn safety warning' });
+    } else if (domBroken) {
+      db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+        .run(now + 3600, now, task.lead_id);
+      recordLeadEvent(leadIdStr, 'warning', 'LinkedIn DOM changed — selector failed', { action: task.action, error: error_message });
+      broadcastLog('dom_broken', { leadId: task.lead_id, action: task.action, message: 'LinkedIn DOM changed — automation selectors need updating' });
+      logger.error('content.js reported DOM breakage', { taskId: task_id, action: task.action, error: error_message });
+    } else if (notConnected) {
+      // Reset the false "connected" state; re-check acceptance tomorrow. Not a
+      // real failure (a state correction) — don't count toward dead-letter.
+      db.prepare("UPDATE leads SET connected_at = NULL, next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+        .run(now + 86400, now, task.lead_id);
+      recordLeadEvent(leadIdStr, 'not_connected', 'Premium/InMail wall — not an accepted 1st-degree connection');
+      logger.warn('send_message hit Premium wall — cleared connected_at', { taskId: task_id, leadId: task.lead_id });
+      broadcastLog('not_connected', { leadId: task.lead_id, message: 'Recipient is not an accepted connection — re-checking later' });
     } else {
-      // Normal failure: retry in 1 hour
-      db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
-        .run(now + 3600, 'pending', now, task.lead_id);
-      logger.warn('Extension task failed — lead retry in 1h', { taskId: task_id, error: error_message });
+      // Normal failure → exponential backoff, or dead-letter after MAX attempts.
+      const failCount = (leadRow?.fail_count ?? 0) + 1;
+      const verdict = nextFailureAction(failCount);
+      if (verdict.action === 'dead_letter') {
+        db.prepare("UPDATE leads SET status = 'error', skip_reason = 'max_retries', fail_count = ?, updated_at = ? WHERE id = ?")
+          .run(failCount, now, task.lead_id);
+        recordLeadEvent(leadIdStr, 'dead_lettered', `Gave up after ${failCount} consecutive failures`, { action: task.action, error: error_message });
+        broadcastLog('lead_dead_lettered', { leadId: task.lead_id, action: task.action, failCount });
+        logger.error('Lead dead-lettered after repeated failures', { taskId: task_id, leadId: task.lead_id, failCount, error: error_message });
+      } else {
+        db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', fail_count = ?, updated_at = ? WHERE id = ?")
+          .run(now + verdict.delaySeconds, failCount, now, task.lead_id);
+        recordLeadEvent(leadIdStr, 'failed', `Attempt ${failCount} failed — retry in ${Math.round(verdict.delaySeconds / 3600)}h`, { action: task.action, error: error_message });
+        logger.warn('Extension task failed — backoff retry', { taskId: task_id, failCount, retryInSeconds: verdict.delaySeconds, error: error_message });
+      }
     }
   }
 
   return res.json({ ok: true });
+});
+
+// ── Inbox ingest (reply detection via extension) ──────────────────────────────
+
+/**
+ * POST /api/extension/inbox
+ * The extension periodically scrapes the LinkedIn messaging list in the user's
+ * real session and posts the recent threads here. We match inbound threads to
+ * leads we've messaged (by participant name) and set replied_at — which the
+ * campaign worker treats as "conversation handed off to a human".
+ * Body: { account_id, threads: [{ name, snippet, isInbound, unread, time }] }
+ */
+router.post('/inbox', (req: Request, res: Response) => {
+  if (!verifyExtensionToken(req)) return res.status(401).json({ error: 'Invalid extension token' });
+
+  const { account_id, threads } = req.body as {
+    account_id?: string;
+    threads?: Array<{ name?: string; snippet?: string; isInbound?: boolean }>;
+  };
+  if (!account_id || !Array.isArray(threads)) {
+    return res.status(400).json({ error: 'account_id and threads[] required' });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let repliesDetected = 0;
+
+  const findLead = db.prepare(`
+    SELECT l.id, l.linkedin_url, l.first_name, l.last_name, l.company, l.title
+    FROM leads l
+    JOIN campaigns c ON c.id = l.campaign_id
+    WHERE c.account_id = ?
+      AND l.replied_at IS NULL
+      AND l.last_message_at IS NOT NULL
+      AND lower(trim(COALESCE(l.first_name,'') || ' ' || COALESCE(l.last_name,''))) = lower(trim(?))
+    LIMIT 1
+  `);
+
+  for (const t of threads) {
+    // Only inbound (their last message, not "You: …") counts as a reply.
+    if (!t || t.isInbound !== true || !t.name) continue;
+    const lead = findLead.get(account_id, t.name) as
+      | { id: string; linkedin_url: string; first_name: string | null; last_name: string | null; company: string | null; title: string | null }
+      | undefined;
+    if (!lead) continue;
+
+    db.prepare('UPDATE leads SET replied_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
+    db.prepare(`
+      INSERT INTO inbox_messages (id, account_id, thread_id, lead_id, direction, sender_name, text, timestamp)
+      VALUES (?, ?, ?, ?, 'in', ?, ?, ?)
+    `).run(uuidv4(), account_id, `ext_${lead.id}`, lead.id, t.name, (t.snippet || '(reply)').slice(0, 2000), now);
+
+    broadcastLog('reply', { leadId: lead.id, name: t.name, url: lead.linkedin_url });
+    recordLeadEvent(lead.id, 'replied', t.snippet || undefined);
+    syncLeadToCrm(lead.id).catch(() => {});
+    fireWebhookEvent('replied', {
+      leadId: lead.id, linkedinUrl: lead.linkedin_url,
+      firstName: lead.first_name, lastName: lead.last_name,
+      company: lead.company, title: lead.title,
+    }).catch(() => {});
+    repliesDetected++;
+  }
+
+  if (repliesDetected > 0) {
+    broadcastLog('inbox_new_messages', { accountId: account_id, count: repliesDetected });
+    logger.info('Inbox poll: replies detected', { account_id, replies: repliesDetected, threads: threads.length });
+  }
+  return res.json({ ok: true, threads: threads.length, replies: repliesDetected });
 });
 
 // ── Campaigns list (for popup) ────────────────────────────────────────────────
@@ -341,12 +450,16 @@ interface CampaignStep {
   id: string;
   step_order: number;
   wait_days: number;
+  action: string;
 }
 
 function handleTaskSuccess(task: Record<string, unknown>, result: Record<string, unknown>, now: number): void {
   const leadId = task.lead_id as string;
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as Lead | undefined;
   if (!lead) return;
+
+  // Any successful task clears the consecutive-failure streak.
+  db.prepare('UPDATE leads SET fail_count = 0 WHERE id = ? AND fail_count > 0').run(leadId);
 
   const step = db.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? AND step_order = ?')
     .get(lead.campaign_id, lead.current_step) as CampaignStep | undefined;
@@ -362,6 +475,7 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
       // feeds dashboard analytics — increment both (mirrors the Playwright path).
       incrementAccountTracker(accountId, 'profiles_visited');
       incrementTracker('profiles_visited');
+      recordLeadEvent(leadId, 'visited');
       advanceLeadStep(leadId, lead.current_step, waitDays, now);
       break;
 
@@ -372,8 +486,27 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
         incrementTracker('connections_sent');
         db.prepare('UPDATE leads SET connection_sent_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('connection_sent', { leadId, url: lead.linkedin_url });
+        recordLeadEvent(leadId, 'connection_sent');
+        advanceLeadStep(leadId, lead.current_step, waitDays, now);
+      } else if (result.reason === 'already_connected') {
+        // Lead is already a 1st-degree connection — record it so the message
+        // step's guard passes, then advance.
+        db.prepare('UPDATE leads SET connected_at = COALESCE(connected_at, ?), connection_sent_at = COALESCE(connection_sent_at, ?), updated_at = ? WHERE id = ?')
+          .run(now, now, now, leadId);
+        advanceLeadStep(leadId, lead.current_step, waitDays, now);
+      } else if (result.reason === 'already_pending') {
+        // Invite was sent earlier but not yet accepted — record sent time and
+        // advance; the message step will probe acceptance before messaging.
+        db.prepare('UPDATE leads SET connection_sent_at = COALESCE(connection_sent_at, ?), updated_at = ? WHERE id = ?')
+          .run(now, now, leadId);
+        advanceLeadStep(leadId, lead.current_step, waitDays, now);
+      } else {
+        // Connection NOT sent (no recognizable reason). Do NOT advance to the
+        // message step — messaging a non-connection fails. Retry connect in 1h.
+        db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+          .run(now + 3600, now, leadId);
+        logger.warn('send_connection not sent — staying on connect step for retry', { leadId, reason: result.reason });
       }
-      advanceLeadStep(leadId, lead.current_step, waitDays, now);
       break;
 
     case 'send_message':
@@ -382,15 +515,20 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
         incrementTracker('messages_sent');
         db.prepare('UPDATE leads SET last_message_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('message_sent', { leadId, url: lead.linkedin_url });
+        recordLeadEvent(leadId, 'message_sent');
       }
       advanceLeadStep(leadId, lead.current_step, waitDays, now);
       break;
 
     case 'check_connection': {
       const connStatus = result.connection_status as string;
+      // A check_connection task is either a dedicated campaign step, or a probe
+      // queued by the message step to verify acceptance before messaging.
+      const isDedicatedStep = step?.action === 'check_connection';
       if (connStatus === 'connected') {
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('connection_accepted', { leadId, url: lead.linkedin_url });
+        recordLeadEvent(leadId, 'connection_accepted');
         // CRM sync
         syncLeadToCrm(leadId).catch(err =>
           logger.error('CRM sync error on connection', { leadId, error: String(err) }),
@@ -400,7 +538,14 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
           firstName: lead.first_name, lastName: lead.last_name,
           company: lead.company, title: lead.title,
         }).catch(() => {});
-        advanceLeadStep(leadId, lead.current_step, waitDays, now);
+        if (isDedicatedStep) {
+          advanceLeadStep(leadId, lead.current_step, waitDays, now);
+        } else {
+          // Probe before a message step — connected_at is now set, so re-run the
+          // SAME step (do NOT advance past it) and the message will send.
+          db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+            .run(now, now, leadId);
+        }
       } else if (connStatus === 'pending') {
         const sentAt = lead.connection_sent_at ?? now;
         const daysPending = (now - sentAt) / 86400;
@@ -413,9 +558,34 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
           db.prepare('UPDATE leads SET next_action_at = ?, status = ?, updated_at = ? WHERE id = ?')
             .run(now + 86400, 'pending', now, leadId);
         }
-      } else {
-        // not_connected or unknown — advance anyway
+      } else if (isDedicatedStep) {
+        // not_connected / unknown on a dedicated step — advance, don't block the funnel.
         advanceLeadStep(leadId, lead.current_step, waitDays, now);
+      } else {
+        // Probe before message but lead is not connected yet. Don't advance past
+        // the message step (would fail). If an invite was sent, defer like
+        // 'pending'; if none was ever sent, route back to the connect step.
+        if (lead.connection_sent_at) {
+          const daysPending = (now - lead.connection_sent_at) / 86400;
+          if (daysPending > 14) {
+            db.prepare("UPDATE leads SET status = 'skipped', skip_reason = 'connection_not_accepted_14d', updated_at = ? WHERE id = ?")
+              .run(now, leadId);
+          } else {
+            db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+              .run(now + 86400, now, leadId);
+          }
+        } else {
+          const connectStep = db.prepare(
+            "SELECT step_order FROM campaign_steps WHERE campaign_id = ? AND action = 'connect' ORDER BY step_order LIMIT 1",
+          ).get(lead.campaign_id) as { step_order: number } | undefined;
+          if (connectStep) {
+            db.prepare("UPDATE leads SET current_step = ?, next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+              .run(connectStep.step_order, now, now, leadId);
+          } else {
+            db.prepare("UPDATE leads SET next_action_at = ?, status = 'pending', updated_at = ? WHERE id = ?")
+              .run(now + 86400, now, leadId);
+          }
+        }
       }
       break;
     }
