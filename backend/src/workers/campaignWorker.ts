@@ -10,7 +10,6 @@ import { resolveBranch } from '../services/branchResolver';
 import { getAssignedText } from '../services/abTest';
 import { generateIcebreaker } from '../services/icebreaker';
 import { sendEmail } from '../services/emailSender';
-import { syncLeadToCrm } from '../services/crmSync';
 import { fireWebhookEvent } from '../services/webhookService';
 import { recordLeadEvent } from '../services/events';
 

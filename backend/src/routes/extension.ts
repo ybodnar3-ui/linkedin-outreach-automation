@@ -20,6 +20,8 @@ import { syncLeadToCrm } from '../services/crmSync';
 import { incrementAccountTracker } from '../services/accountHealth';
 import { recordLeadEvent } from '../services/events';
 import { nextFailureAction } from '../utils/retry';
+import { classifyReply } from '../services/replyClassifier';
+import { discoverEmail } from '../services/emailDiscovery';
 
 const router = Router();
 
@@ -307,10 +309,15 @@ router.post('/inbox', (req: Request, res: Response) => {
     if (!lead) continue;
 
     db.prepare('UPDATE leads SET replied_at = ?, updated_at = ? WHERE id = ?').run(now, now, lead.id);
+    const messageId = uuidv4();
+    const replyText = (t.snippet || '(reply)').slice(0, 2000);
     db.prepare(`
       INSERT INTO inbox_messages (id, account_id, thread_id, lead_id, direction, sender_name, text, timestamp)
       VALUES (?, ?, ?, ?, 'in', ?, ?, ?)
-    `).run(uuidv4(), account_id, `ext_${lead.id}`, lead.id, t.name, (t.snippet || '(reply)').slice(0, 2000), now);
+    `).run(messageId, account_id, `ext_${lead.id}`, lead.id, t.name, replyText, now);
+
+    // Auto-classify the reply's sentiment (fire-and-forget; LLM, optional key).
+    classifyReply(messageId, replyText).catch(() => {});
 
     broadcastLog('reply', { leadId: lead.id, name: t.name, url: lead.linkedin_url });
     recordLeadEvent(lead.id, 'replied', t.snippet || undefined);
@@ -529,6 +536,10 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
         db.prepare('UPDATE leads SET connected_at = ?, updated_at = ? WHERE id = ?').run(now, now, leadId);
         broadcastLog('connection_accepted', { leadId, url: lead.linkedin_url });
         recordLeadEvent(leadId, 'connection_accepted');
+        // Auto email discovery on acceptance (opt-in toggle, fire-and-forget).
+        if (getSetting('auto_email_discovery') === 'true') {
+          discoverEmail(leadId).catch(() => {});
+        }
         // CRM sync
         syncLeadToCrm(leadId).catch(err =>
           logger.error('CRM sync error on connection', { leadId, error: String(err) }),

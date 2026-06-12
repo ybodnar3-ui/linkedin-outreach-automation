@@ -15,6 +15,11 @@
 - **Worker — синглтон з cross-process lease-локом** (`worker_lock`): два процеси НІКОЛИ не виконують дії одночасно (= захист від подвійних дій = бана).
 - **Чесна ціль:** не «закрий Mac», а «працює поки відкритий Chrome; backend у хмарі 24/7; дії — через реальний браузер».
 
+### Стан периферії після ADR-001 (Phase 5 triage)
+- ✅ **Робочі:** CRM-синк (HubSpot/Pipedrive), A/B-тести, webhooks, SMTP-email, ручний email discovery, icebreaker (на доступних полях), reply-класифікація (тепер авто на ingest), auto email discovery (на accepted, якщо увімкнено).
+- ⚠️ **Dormant:** **Proxycurl auto-enrichment** — раніше тригерився з `visitProfile` (видалено). Код і key-test лишаються, але авто-збагачення НЕ виконується. Свідоме рішення: не авто-викликати (палить кредити); перепідключати вручну за потреби.
+- 🗑️ **Dead UI:** `LeadsPage` Sales Nav / LinkedIn-search import — бекенд віддає 501 (імпорт через попап розширення). Кнопки лишені, показують зрозумілий тост.
+
 ---
 
 ## What This Is

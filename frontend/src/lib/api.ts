@@ -1,4 +1,5 @@
 import axios from 'axios';
+import toast from 'react-hot-toast';
 
 export const api = axios.create({
   baseURL: '/api',
@@ -15,10 +16,21 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const status = err.response?.status;
+    if (status === 401) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_username');
       window.location.href = '/login';
+      return Promise.reject(err);
+    }
+    // Surface API errors instead of failing silently. Login is excluded (the
+    // LoginPage shows its own inline error).
+    const url = err.config?.url || '';
+    if (!url.includes('/auth/login')) {
+      const msg = err.response?.data?.error
+        || (err.code === 'ECONNABORTED' ? 'Request timed out' : err.message)
+        || 'Something went wrong';
+      toast.error(String(msg));
     }
     return Promise.reject(err);
   }

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-06-12T19:04:03.188Z",
+  "timestamp": "2026-06-12T19:11:03.207Z",
   "source": "auto-postool",
   "partial": false,
   "phase": null,
@@ -18,10 +18,6 @@
   "uncommitted_files": [
     {
       "status": "M",
-      "path": ".DS_Store"
-    },
-    {
-      "status": "M",
       "path": ".planning/HANDOFF.json"
     },
     {
@@ -30,71 +26,7 @@
     },
     {
       "status": "M",
-      "path": "Dockerfile"
-    },
-    {
-      "status": "M",
-      "path": "backend/package.json"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/index.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/routes/accounts.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/routes/analytics.ts"
-    },
-    {
-      "status": "M",
       "path": "backend/src/routes/extension.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/routes/inbox.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/routes/leads.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/routes/settings.ts"
-    },
-    {
-      "status": "D",
-      "path": "backend/src/services/browser.ts"
-    },
-    {
-      "status": "D",
-      "path": "backend/src/services/inbox.ts"
-    },
-    {
-      "status": "D",
-      "path": "backend/src/services/linkedin.ts"
-    },
-    {
-      "status": "D",
-      "path": "backend/src/services/linkedinScraper.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/services/profileEnricher.ts"
-    },
-    {
-      "status": "D",
-      "path": "backend/src/services/salesNavScraper.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/services/storage.ts"
-    },
-    {
-      "status": "M",
-      "path": "backend/src/utils/humanizer.ts"
     },
     {
       "status": "M",
@@ -102,15 +34,11 @@
     },
     {
       "status": "M",
-      "path": "backend/src/workers/inboxPoller.ts"
+      "path": "frontend/package.json"
     },
     {
       "status": "M",
-      "path": "extension/background.js"
-    },
-    {
-      "status": "M",
-      "path": "extension/content.js"
+      "path": "frontend/src/App.tsx"
     },
     {
       "status": "M",
@@ -118,41 +46,9 @@
     },
     {
       "status": "M",
-      "path": "frontend/src/pages/DashboardPage.tsx"
-    },
-    {
-      "status": "M",
       "path": "package-lock.json"
-    },
-    {
-      "status": "??",
-      "path": ".planning/decisions/"
-    },
-    {
-      "status": "??",
-      "path": "SECURITY.md"
-    },
-    {
-      "status": "??",
-      "path": "backend/src/services/backup.ts"
-    },
-    {
-      "status": "??",
-      "path": "backend/src/services/events.ts"
-    },
-    {
-      "status": "??",
-      "path": "backend/src/utils/retry.test.ts"
-    },
-    {
-      "status": "??",
-      "path": "backend/src/utils/retry.ts"
-    },
-    {
-      "status": "??",
-      "path": "data/"
     }
   ],
   "next_action": null,
-  "context_notes": "Recent commits:\n545cbee fix: sendMessage waits for compose box via MutationObserver (15s)\n74eb451 fix: sendMessage debug URL + session path fix\nf3aee68 fix: downgrade WS rejection log to debug (reduces noise on localhost) Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nba1b15d fix: sendMessage — modern LinkedIn chat overlay selectors\n9264e0d harden: allowlist tracker field names before SQL interpolation"
+  "context_notes": "Recent commits:\n32546cf refactor: extension-only architecture + reliability/observability (Phases 0–4)\n545cbee fix: sendMessage waits for compose box via MutationObserver (15s)\n74eb451 fix: sendMessage debug URL + session path fix\nf3aee68 fix: downgrade WS rejection log to debug (reduces noise on localhost) Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nba1b15d fix: sendMessage — modern LinkedIn chat overlay selectors"
 }

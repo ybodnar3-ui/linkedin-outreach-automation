@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'react-hot-toast';
 import { queryClient } from './lib/queryClient';
 import { wsClient } from './lib/ws';
 import { useEffect, ReactNode } from 'react';
@@ -89,6 +90,7 @@ function AppRoutes() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
       <BrowserRouter>
         <AppRoutes />
       </BrowserRouter>
