@@ -576,6 +576,12 @@ function handleTaskSuccess(task: Record<string, unknown>, result: Record<string,
         // Probe before message but lead is not connected yet. Don't advance past
         // the message step (would fail). If an invite was sent, defer like
         // 'pending'; if none was ever sent, route back to the connect step.
+        // Self-heal: a not_connected verdict contradicts any connected_at set by
+        // the OLD buggy "Message button = connected" heuristic — clear it.
+        if (lead.connected_at) {
+          db.prepare('UPDATE leads SET connected_at = NULL, updated_at = ? WHERE id = ?').run(now, leadId);
+          recordLeadEvent(leadId, 'not_connected', 'check_connection: not 1st-degree — cleared stale connected_at');
+        }
         if (lead.connection_sent_at) {
           const daysPending = (now - lead.connection_sent_at) / 86400;
           if (daysPending > 14) {
